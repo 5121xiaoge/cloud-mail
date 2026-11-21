@@ -1,4 +1,5 @@
 import BizError from '../error/biz-error';
+import domainUtils from '../utils/domain-uitls';
 import accountService from './account-service';
 import orm from '../entity/orm';
 import user from '../entity/user';
@@ -37,7 +38,7 @@ const userService = {
 		const [account, roleRow, permKeys] = await Promise.all([
 			accountService.selectByEmailIncludeDel(c, userRow.email),
 			roleService.selectById(c, userRow.type),
-			userRow.email === c.env.admin ? Promise.resolve(['*']) : permService.userPermKeys(c, userId)
+			adminMode.isAdmin(c, userRow.email) ? Promise.resolve(['*']) : permService.userPermKeys(c, userId)
 		]);
 
 		const user = {};
@@ -50,7 +51,7 @@ const userService = {
 		user.role = roleRow;
 		user.type = userRow.type;
 
-		if (c.env.admin === userRow.email) {
+		if (adminMode.isAdmin(c, userRow.email)) {
 			user.role = constant.ADMIN_ROLE
 			user.type = 0;
 		}
@@ -183,7 +184,7 @@ const userService = {
 	},
 
 	async physicsDelete(c, params) {
-		const userIds = paramUtils.ids(params?.userIds);
+		const userIds = paramUtils.ids(params?.userIds, 90);
 		await this.assertNotProtected(c, userIds);
 		await accountService.physicsDeleteByUserIds(c, userIds);
 		await oauthService.deleteByUserIds(c, userIds);
@@ -290,7 +291,7 @@ const userService = {
 				sendAction.hasPerm = false;
 			}
 
-			if (user.email === c.env.admin) {
+			if (adminMode.isAdmin(c, user.email)) {
 				sendAction.sendType = constant.ADMIN_ROLE.sendType;
 				sendAction.sendCount = constant.ADMIN_ROLE.sendCount;
 				sendAction.hasPerm = true;
@@ -384,6 +385,15 @@ const userService = {
 		}).where(eq(user.userId, userId)).run();
 	},
 
+	// 原子预占发送额度：只有加上本次数量后不超过上限才会更新成功
+	async reserveSendCount(c, userId, quantity, limit) {
+		const rows = await orm(c).update(user)
+			.set({ sendCount: sql`${user.sendCount} + ${quantity}` })
+			.where(and(eq(user.userId, userId), sql`${user.sendCount} + ${quantity} <= ${limit}`))
+			.returning({ userId: user.userId });
+		return rows.length > 0;
+	},
+
 	async updateAllUserType(c, type, curType) {
 		await orm(c)
 			.update(user)
@@ -429,7 +439,7 @@ const userService = {
 			throw new BizError(t('emailAndPwdEmpty'));
 		}
 
-		if (!c.env.domain.includes(emailUtils.getDomain(email))) {
+		if (!domainUtils.isOwnDomain(c, email)) {
 			throw new BizError(t('notEmailDomain'));
 		}
 

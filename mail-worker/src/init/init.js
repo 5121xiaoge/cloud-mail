@@ -43,6 +43,7 @@ const dbInit = {
 		await this.v3_4DB(c);
 		await this.v3_5DB(c);
 		await this.v3_6DB(c);
+		await this.v3_7DB(c);
 		await this.customDB(c);
 		await userService.initAdmin(c);
 		await settingService.refresh(c);
@@ -54,6 +55,21 @@ const dbInit = {
 			await c.env.db.prepare(`ALTER TABLE setting ADD COLUMN login_darken_factor INTEGER NOT NULL DEFAULT 0;`).run();
 		} catch (e) {
 			console.warn(`sql skip:${e.message}`);
+		}
+	},
+
+	// 补充附件、星标清理及 Resend 回调常用查询的索引
+	async v3_7DB(c) {
+		try {
+			await c.env.db.batch([
+				c.env.db.prepare(`CREATE INDEX IF NOT EXISTS idx_attachments_key ON attachments(key)`),
+				c.env.db.prepare(`CREATE INDEX IF NOT EXISTS idx_attachments_user ON attachments(user_id)`),
+				c.env.db.prepare(`CREATE INDEX IF NOT EXISTS idx_attachments_account ON attachments(account_id)`),
+				c.env.db.prepare(`CREATE INDEX IF NOT EXISTS idx_email_account ON email(account_id)`),
+				c.env.db.prepare(`CREATE INDEX IF NOT EXISTS idx_email_resend_id ON email(resend_email_id)`)
+			]);
+		} catch (e) {
+			console.warn(`跳过索引：${e.message}`);
 		}
 	},
 

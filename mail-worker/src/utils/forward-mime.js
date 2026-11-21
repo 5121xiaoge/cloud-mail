@@ -14,16 +14,22 @@ function encodeMimeWord(value = '') {
 function formatAddressList(list) {
 	return (list || []).map(item => {
 		if (typeof item === 'string') {
-			return item;
+			return cleanAddress(item);
 		}
 		return formatMailbox(item.address || item.email, item.name);
 	}).filter(Boolean);
 }
 
+function cleanAddress(address) {
+	return String(address || '').replace(/[\s<>,;"]/g, '');
+}
+
 function formatMailbox(address, name) {
+	address = cleanAddress(address);
 	if (!address) {
 		return '';
 	}
+	name = String(name || '').replace(/[\r\n\t]+/g, ' ').trim();
 	if (!name || name === address) {
 		return address;
 	}
@@ -48,7 +54,7 @@ function toBase64Body(content) {
 
 function mimePart(contentType, body, extraHeaders = []) {
 	return [
-		`Content-Type: ${contentType}`,
+		`Content-Type: ${String(contentType).replace(/[\r\n]+/g, ' ')}`,
 		'Content-Transfer-Encoding: base64',
 		...extraHeaders,
 		'',
@@ -77,7 +83,8 @@ const forwardMime = {
 			'MIME-Version: 1.0'
 		];
 		if (params.sendType === 'reply' && params.messageId) {
-			headers.push(`In-Reply-To: ${params.messageId}`, `References: ${params.messageId}`);
+			const messageId = String(params.messageId).replace(/[\r\n]+/g, '');
+			headers.push(`In-Reply-To: ${messageId}`, `References: ${messageId}`);
 		}
 
 		const alt = `alt_${crypto.randomUUID().replace(/-/g, '')}`;
@@ -106,7 +113,7 @@ const forwardMime = {
 		for (const attachment of attachments) {
 			const extra = [`Content-Disposition: ${attachment.disposition || 'attachment'}; ${filenameParam(attachment.filename)}`];
 			if (attachment.contentId) {
-				extra.push(`Content-ID: <${attachment.contentId}>`);
+				extra.push(`Content-ID: <${String(attachment.contentId).replace(/[\r\n<>]/g, '')}>`);
 			}
 			parts.push(`--${mixed}`, mimePart(attachment.type || 'application/octet-stream', attachment.content, extra));
 		}

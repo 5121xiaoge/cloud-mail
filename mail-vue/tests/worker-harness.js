@@ -4,13 +4,17 @@ import fileUtils from '../../mail-worker/src/utils/file-utils.js';
 import emailUtils from '../../mail-worker/src/utils/email-utils.js';
 import { isDangerousAttType } from '../../mail-worker/src/utils/att-headers.js';
 import { notifyMailWsFromContext } from '../../mail-worker/src/websocket/notify.js';
+import adminMode from '../../mail-worker/src/security/admin-mode.js';
+
+// param-utils 依赖 i18n，测试中只提供分批方法
+const paramUtils = { chunk: (list, size = 90) => Array.from({ length: Math.ceil(list.length / size) }, (_, i) => list.slice(i * size, (i + 1) * size)) };
 
 export const { DatabaseSync } = await import('node:sqlite').catch(() => ({}));
 export const readWorker = path => readFileSync(new URL(`../../mail-worker/src/${path}`, import.meta.url), 'utf8');
 const program = source => babelParse(source, { sourceType: 'module' }).program.body;
 
 export function workerObject(path, name, dependencies = {}) {
-    dependencies = { fileUtils, isDangerousAttType, ...dependencies };
+    dependencies = { fileUtils, isDangerousAttType, adminMode, paramUtils, ...dependencies };
     const source = readWorker(path);
     const object = program(source).find(node => node.type === 'VariableDeclaration' &&
         node.declarations[0].id.name === name).declarations[0].init;
@@ -20,6 +24,7 @@ export function workerObject(path, name, dependencies = {}) {
 }
 
 export function receiveHandler(dependencies) {
+    dependencies = { adminMode, ...dependencies };
     const source = readWorker('email/email.js');
     const functions = program(source).map(node => node.type === 'ExportNamedDeclaration' ? node.declaration : node)
         .filter(node => node?.type === 'FunctionDeclaration').map(node => source.slice(node.start, node.end)).join('\n');
@@ -80,7 +85,8 @@ export function database(t) {
     for (const model of [email, account, star, att]) {
         const columns = Object.values(model).map((column, index) => `${column.name} ${
             index === 0 ? 'INTEGER PRIMARY KEY AUTOINCREMENT' :
-                column.integer ? 'INTEGER DEFAULT 0' : "TEXT DEFAULT ''"
+                column.integer ? 'INTEGER DEFAULT 0' :
+                    column.name === 'create_time' ? 'TEXT DEFAULT CURRENT_TIMESTAMP' : "TEXT DEFAULT ''"
         }`);
         sqlite.exec(`CREATE TABLE ${model.tableName} (${columns.join(',')})`);
     }

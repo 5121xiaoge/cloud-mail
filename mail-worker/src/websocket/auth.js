@@ -36,7 +36,7 @@ export async function canWatchAllEmail(env, user) {
 	if (!user?.userId) {
 		return false;
 	}
-	if (user.email && env.admin && user.email === env.admin) {
+	if (adminMode.isAdmin({ env }, user.email)) {
 		return true;
 	}
 	const keys = await permService.userPermKeys({ env }, user.userId);

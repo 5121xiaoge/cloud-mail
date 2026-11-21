@@ -25,7 +25,7 @@ function sqliteFixture(t) {
     return { sqlite, c: { env: { db } } };
 }
 const upgradeSteps = ['v2_3DB', 'v2_4DB', 'v2_5DB', 'v2_6DB', 'v2_7DB', 'v2_8DB',
-    'v3_0DB', 'v3_1DB', 'v3_2DB', 'v3_3DB', 'v3_4DB', 'v3_5DB', 'v3_6DB', 'customDB'];
+    'v3_0DB', 'v3_1DB', 'v3_2DB', 'v3_3DB', 'v3_4DB', 'v3_5DB', 'v3_6DB', 'v3_7DB', 'customDB'];
 
 test('local schema upgrades preserve customized dimming, accounts and password hashes and are repeatable',
     { skip: !DatabaseSync && 'Node SQLite is unavailable' }, async t => {

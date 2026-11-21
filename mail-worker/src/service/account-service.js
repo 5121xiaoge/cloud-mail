@@ -1,4 +1,5 @@
 import BizError from '../error/biz-error';
+import domainUtils from '../utils/domain-uitls';
 import verifyUtils from '../utils/verify-utils';
 import emailUtils from '../utils/email-utils';
 import userService from './user-service';
@@ -13,6 +14,7 @@ import roleService from './role-service';
 import { t } from '../i18n/i18n';
 import verifyRecordService from './verify-record-service';
 import paramUtils from '../utils/param-utils';
+import adminMode from '../security/admin-mode';
 
 const accountService = {
 
@@ -36,7 +38,7 @@ const accountService = {
 			throw new BizError(t('notEmail'));
 		}
 
-		if (!c.env.domain.includes(emailUtils.getDomain(email))) {
+		if (!domainUtils.isOwnDomain(c, email)) {
 			throw new BizError(t('notExistDomain'));
 		}
 
@@ -69,7 +71,7 @@ const accountService = {
 		const userRow = await userService.selectById(c, userId);
 		const roleRow = await roleService.selectById(c, userRow.type);
 
-		if (userRow.email !== c.env.admin) {
+		if (!adminMode.isAdmin(c, userRow.email)) {
 
 			if (roleRow.accountCount > 0) {
 				const userAccountCount = await accountService.countUserAccount(c, userId)
@@ -117,7 +119,7 @@ const accountService = {
 		let { accountId, size, lastSort } = params;
 
 		accountId = Number(accountId);
-		size = Number(size);
+		size = Math.min(Math.max(Number(size) || 30, 1), 30);
 		lastSort = Number(lastSort);
 
 		if (size > 30) {

@@ -6,6 +6,7 @@ import { createPinia } from 'pinia';
 import { createPersistedState } from 'pinia-plugin-persistedstate';
 import { babelParse, compileScript, parse } from 'vue/compiler-sfc';
 import { useAccountStore } from '../src/store/account.js';
+import adminMode from '../../mail-worker/src/security/admin-mode.js';
 
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
 const initSource = read('../src/init/init.js');
@@ -212,7 +213,7 @@ const serviceNode = babelParse(serviceSource, { sourceType: 'module' }).program.
     .find(node => node.type === 'VariableDeclaration' && node.declarations[0].id.name === 'userService')
     .declarations[0].init.properties.find(node => node.key.name === 'loginUserInfo');
 const createLoginService = new Function('userService', 'accountService', 'roleService', 'permService', 'constant',
-    'BizError', 't', 'return ({' + serviceSource.slice(serviceNode.start, serviceNode.end) + '}).loginUserInfo;');
+    'BizError', 't', 'adminMode', 'return ({' + serviceSource.slice(serviceNode.start, serviceNode.end) + '}).loginUserInfo;');
 
 async function restoreServerMailbox(savedId, selected, perms = ['account:query']) {
     const lookups = [];
@@ -221,7 +222,7 @@ async function restoreServerMailbox(savedId, selected, perms = ['account:query']
             lookups.push(id);
             return selected;
         } }, { selectById: async () => ({}) }, { userPermKeys: async () => perms },
-        { ADMIN_ROLE: {} }, Error, value => value);
+        { ADMIN_ROLE: {} }, Error, value => value, adminMode);
     const user = await login({ env: { admin: 'admin@example.test' } }, 10, savedId);
     return { user, lookups };
 }

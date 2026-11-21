@@ -10,12 +10,16 @@ import user from '../entity/user';
 import verifyUtils from '../utils/verify-utils';
 import { t } from '../i18n/i18n.js';
 import emailUtils from '../utils/email-utils';
+import paramUtils from '../utils/param-utils';
 
 const roleService = {
 
 	async add(c, params, userId) {
 
 		let { name, permIds, banEmail, availDomain } = params;
+		banEmail = Array.isArray(banEmail) ? banEmail.map(String) : [];
+		availDomain = Array.isArray(availDomain) ? availDomain.map(String) : [];
+		permIds = Array.isArray(permIds) ? permIds.map(Number).filter(id => Number.isSafeInteger(id) && id > 0) : [];
 
 		if (!name) {
 			throw new BizError(t('emptyRoleName'));
@@ -33,7 +37,7 @@ const roleService = {
 
 		availDomain = availDomain.join(',');
 
-		roleRow = await orm(c).insert(role).values({...params, banEmail, availDomain, userId}).returning().get();
+		roleRow = await orm(c).insert(role).values({...this.pickRoleFields(params), banEmail, availDomain, userId}).returning().get();
 
 		if (permIds.length === 0) {
 			return;
@@ -44,6 +48,21 @@ const roleService = {
 		await orm(c).insert(rolePerm).values(rolePermList).run();
 
 
+	},
+
+	// 只允许写入角色表的业务字段，防止通过请求体改写 roleId、isDefault 等字段
+	pickRoleFields(params) {
+		const fields = ['name', 'key', 'description', 'sort', 'sendCount', 'sendType', 'accountCount', 'banEmailType'];
+		const data = {};
+		for (const field of fields) {
+			if (params?.[field] !== undefined) {
+				data[field] = params[field];
+			}
+		}
+		if (data.sendType !== undefined && !['count', 'day', 'ban', 'internal'].includes(data.sendType)) {
+			delete data.sendType;
+		}
+		return data;
 	},
 
 	async roleList(c) {
@@ -65,6 +84,10 @@ const roleService = {
 	async setRole(c, params) {
 
 		let { name, permIds, roleId, banEmail, availDomain } = params;
+		banEmail = Array.isArray(banEmail) ? banEmail.map(String) : [];
+		availDomain = Array.isArray(availDomain) ? availDomain.map(String) : [];
+		permIds = Array.isArray(permIds) ? permIds.map(Number).filter(id => Number.isSafeInteger(id) && id > 0) : [];
+		roleId = paramUtils.id(roleId);
 
 		if (!name) {
 			throw new BizError(t('emptyRoleName'));
@@ -82,7 +105,7 @@ const roleService = {
 
 		availDomain = availDomain.join(',')
 
-		await orm(c).update(role).set({...params, banEmail, availDomain}).where(eq(role.roleId, roleId)).run();
+		await orm(c).update(role).set({...this.pickRoleFields(params), banEmail, availDomain}).where(eq(role.roleId, roleId)).run();
 		await orm(c).delete(rolePerm).where(eq(rolePerm.roleId, roleId)).run();
 
 		if (permIds.length > 0) {
@@ -94,7 +117,7 @@ const roleService = {
 
 	async delete(c, params) {
 
-		const { roleId } = params;
+		const roleId = paramUtils.id(params?.roleId);
 
 		const roleRow = await orm(c).select().from(role).where(eq(role.roleId, roleId)).get();
 

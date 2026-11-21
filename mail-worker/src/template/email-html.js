@@ -5,7 +5,9 @@ import { sanitizeEmailHtml } from '../utils/html-sanitize';
 export default function emailHtmlTemplate(html, domain) {
 
 	let content = sanitizeEmailHtml(html || '');
-	content = content.replace(/{{domain}}/g, domainUtils.toOssDomain(domain) + '/');
+	// 未配置 R2 公开域名时使用本站相对路径（/attachments/...）
+	const base = domain ? domainUtils.toOssDomain(domain) + '/' : '/';
+	content = content.replace(/{{domain}}/g, base);
 
 	return `<!DOCTYPE html>
 <html lang="en">

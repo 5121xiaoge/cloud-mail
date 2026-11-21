@@ -31,6 +31,7 @@ import forwardMime from '../utils/forward-mime';
 import verifyUtils from '../utils/verify-utils';
 import { notifyMailWsFromContext } from '../websocket/notify';
 import proxyService from './proxy-service';
+import adminMode from '../security/admin-mode';
 
 const emailService = {
 
@@ -340,17 +341,20 @@ const emailService = {
 	async delete(c, params, userId) {
 		const emailIdList = paramUtils.ids(params?.emailIds);
 		const { syncDelete } = await settingService.query(c);
-		if (syncDelete === settingConst.syncDelete.OPEN) {
-			const owned = await orm(c).select({ emailId: email.emailId }).from(email)
-				.where(and(eq(email.userId, userId), inArray(email.emailId, emailIdList))).all();
-			if (owned.length) await this.physicsDelete(c, { emailIds: owned.map(row => row.emailId).join(',') });
-			return;
+		// D1 单条语句最多绑定 100 个参数，分批处理
+		for (const ids of paramUtils.chunk(emailIdList)) {
+			if (syncDelete === settingConst.syncDelete.OPEN) {
+				const owned = await orm(c).select({ emailId: email.emailId }).from(email)
+					.where(and(eq(email.userId, userId), inArray(email.emailId, ids))).all();
+				if (owned.length) await this.deleteByIds(c, owned.map(row => row.emailId));
+				continue;
+			}
+			await orm(c).update(email).set({ isDel: isDel.DELETE }).where(
+				and(
+					eq(email.userId, userId),
+					inArray(email.emailId, ids)))
+				.run();
 		}
-		await orm(c).update(email).set({ isDel: isDel.DELETE }).where(
-			and(
-				eq(email.userId, userId),
-				inArray(email.emailId, emailIdList)))
-			.run();
 	},
 
 	receive(c, params, cidAttList, r2domain) {
@@ -399,6 +403,14 @@ const emailService = {
 			attachments = [] //附件
 		} = params;
 
+		receiveEmail = this.normalizeAddressList(receiveEmail);
+		if (receiveEmail.length === 0) {
+			throw new BizError(t('emptyEmail'));
+		}
+		if (typeof name === 'string') {
+			name = name.replace(/[\r\n\t]+/g, ' ').trim().slice(0, 64);
+		}
+		subject = String(subject ?? '').replace(/[\r\n]+/g, ' ');
 		ccEmail = this.normalizeAddressList(ccEmail);
 		bccEmail = this.normalizeAddressList(bccEmail);
 		const takenAddress = new Set((receiveEmail || []).map(item => String(item).toLowerCase()));
@@ -435,7 +447,7 @@ const emailService = {
 			return domainList.includes(domain);
 		});
 
-		if (c.env.admin !== userRow.email) {
+		if (!adminMode.isAdmin(c, userRow.email)) {
 
 			//发件被禁用
 			if (roleRow.sendType === 'ban') {
@@ -450,7 +462,7 @@ const emailService = {
 		}
 
 		//如果不是管理员，权限设置了发送次数
-		if (c.env.admin !== userRow.email && roleRow.sendCount) {
+		if (!adminMode.isAdmin(c, userRow.email) && roleRow.sendCount) {
 
 			if (userRow.sendCount >= roleRow.sendCount) {
 				if (roleRow.sendType === 'day') throw new BizError(t('daySendLimit'), 403);
@@ -474,7 +486,7 @@ const emailService = {
 			throw new BizError(t('sendEmailNotCurUser'));
 		}
 
-		if (c.env.admin !== userRow.email) {
+		if (!adminMode.isAdmin(c, userRow.email)) {
 			//用户没有这个域名的使用权限
 			if(!roleService.hasAvailDomainPerm(roleRow.availDomain, accountRow.email)) {
 				throw new BizError(t('noDomainPermSend'),403)
@@ -505,7 +517,7 @@ const emailService = {
 
 			emailRow = await this.selectById(c, emailId);
 
-			if (!emailRow) {
+			if (!emailRow || emailRow.userId !== userId) {
 				throw new BizError(t('notExistEmailReply'));
 			}
 
@@ -532,6 +544,11 @@ const emailService = {
 			throw new BizError(t('attLimit'));
 		}
 
+		// 站内投递每个收件人都要单独写库，同样限制数量，避免超出 D1 单次调用的查询上限
+		if (allInternal && quotaCount > 50) {
+			throw new BizError(t('recipientLimit'));
+		}
+
 		if (!allInternal) {
 			const perMessageCount = (separate ? 1 : receiveEmail.length) + copyCount;
 			if (perMessageCount > 50) {
@@ -552,6 +569,13 @@ const emailService = {
 			}
 		};
 
+		// 原子预占发送额度，防止并发请求同时通过上面的额度检查；未实际发出的部分在最后退回
+		const quotaLimited = !adminMode.isAdmin(c, userRow.email) && !!roleRow.sendCount && roleRow.sendType !== 'internal';
+		if (quotaLimited && !await userService.reserveSendCount(c, userId, quotaCount, roleRow.sendCount)) {
+			throw new BizError(t(roleRow.sendType === 'day' ? 'daySendLack' : 'totalSendLack'), 403);
+		}
+		context.saveParams.quotaReserved = quotaLimited;
+
 		// 全部站内收件人走本地投递；存在站外收件人时优先 CF，其次 Resend。
 		let deliveries;
 		if (allInternal) {
@@ -566,13 +590,21 @@ const emailService = {
 		let sendError = '';
 
 		// 渠道每完成一组发送并保存记录后返回结果，后续发送失败仍保留已完成部分。
-		for await (const delivery of deliveries) {
-			if (delivery.error) {
-				sendError = delivery.error.message;
-				break;
-			}
+		try {
+			for await (const delivery of deliveries) {
+				if (delivery.error) {
+					sendError = delivery.error.message;
+					break;
+				}
 
-			emailResults.push(...delivery.emails);
+				emailResults.push(...delivery.emails);
+			}
+		} finally {
+			// 退回预占但未实际发出的额度
+			const deliveredCount = emailResults.reduce((sum, item) => sum + (item.deliveredCount || 0), 0);
+			if (quotaLimited && quotaCount > deliveredCount) {
+				await userService.incrUserSendCount(c, deliveredCount - quotaCount, userId);
+			}
 		}
 
 		if (!separate) {
@@ -691,11 +723,12 @@ const emailService = {
 			emailData.relation = messageId;
 		}
 		const deliveredCount = receiveEmail.length + ccEmail.length + bccEmail.length;
-		if (roleRow.sendCount && roleRow.sendType !== 'internal') {
+		if (!params.quotaReserved && roleRow.sendCount && roleRow.sendType !== 'internal') {
 			await userService.incrUserSendCount(c, deliveredCount, userId);
 		}
 
 		const emailResult = await orm(c).insert(email).values(emailData).returning().get();
+		emailResult.deliveredCount = deliveredCount;
 
 		if (imageDataList.length > 0) {
 			await attService.saveArticleAtt(c, imageDataList, userId, accountId, emailResult.emailId);
@@ -979,7 +1012,7 @@ const emailService = {
 				let { banEmail, availDomain } = roleRow;
 
 				//如果收件人没有这个域名的使用权限和有邮件拦截，就把邮件改为拒收状态
-				if (email !== c.env.admin) {
+				if (!adminMode.isAdmin(c, email)) {
 
 					if (!roleService.hasAvailDomainPerm(availDomain, email)) {
 						emailValues.status = emailConst.status.BOUNCED;
@@ -1094,7 +1127,11 @@ const emailService = {
 		}
 
 		//转发到其他邮箱。发件人用站内实际发件人，信头收件人保留原收件人，信封送到已验证地址。
-		if (forwardStatus === settingConst.forwardStatus.OPEN && forwardEmail && emailRowList.length > 0) {
+		if (forwardStatus === settingConst.forwardStatus.OPEN && forwardEmail && emailRowList.length > 0 && !c.env.forward) {
+			console.warn('站内邮件转发已跳过：wrangler.toml 未配置名为 forward 的 send_email 绑定');
+		}
+
+		if (forwardStatus === settingConst.forwardStatus.OPEN && forwardEmail && emailRowList.length > 0 && c.env.forward) {
 
 			const addresses = forwardEmail.split(',').map(address => address.trim()).filter(Boolean);
 			const params = {
@@ -1211,14 +1248,24 @@ const emailService = {
 
 	async physicsDelete(c, params) {
 		const emailIds = paramUtils.ids(params?.emailIds);
-		await attService.removeByEmailIds(c, emailIds);
-		await starService.removeByEmailIds(c, emailIds);
-		await orm(c).delete(email).where(inArray(email.emailId, emailIds)).run();
+		await this.deleteByIds(c, emailIds);
+	},
+
+	// 物理删除邮件及其附件、星标，分批执行
+	async deleteByIds(c, emailIds) {
+		for (const ids of paramUtils.chunk(emailIds)) {
+			await attService.removeByEmailIds(c, ids);
+			await starService.removeByEmailIds(c, ids);
+			await orm(c).delete(email).where(inArray(email.emailId, ids)).run();
+		}
 	},
 
 	async physicsDeleteUserIds(c, userIds) {
-		await attService.removeByUserIds(c, userIds);
-		await orm(c).delete(email).where(inArray(email.userId, userIds)).run();
+		for (const ids of paramUtils.chunk(userIds)) {
+			await attService.removeByUserIds(c, ids);
+			await starService.removeByUserIds(c, ids);
+			await orm(c).delete(email).where(inArray(email.userId, ids)).run();
+		}
 	},
 
 	updateEmailStatus(c, params) {
@@ -1383,6 +1430,14 @@ const emailService = {
 		await c.env.db.prepare(`UPDATE email AS e SET is_del = 0,
 			status = CASE WHEN EXISTS (SELECT 1 FROM account WHERE account_id = e.account_id) THEN ${emailConst.status.RECEIVE} ELSE ${emailConst.status.NOONE} END
 			WHERE status = ${emailConst.status.SAVING} AND EXISTS (SELECT 1 FROM email_delivery WHERE email_id = e.email_id)`).run();
+
+		// 收件中途失败、超过 1 天仍处于保存中的邮件不会再完成，清理掉避免数据和附件堆积
+		const stale = await c.env.db.prepare(`SELECT email_id FROM email WHERE status = ${emailConst.status.SAVING}
+			AND create_time < datetime('now', '-1 day') LIMIT 500`).all();
+		const staleIds = (stale.results || []).map(row => row.email_id);
+		if (staleIds.length > 0) {
+			await this.deleteByIds(c, staleIds);
+		}
 	},
 
 	async autoClean(c) {
@@ -1406,6 +1461,12 @@ const emailService = {
 
 	async batchDelete(c, params) {
 		let { sendName, sendEmail, toEmail, subject, startTime, endTime, type  } = params
+
+		// 只填通配符（如 %、_）等于匹配全部邮件，直接拒绝，避免误删整个邮件库
+		const onlyWildcard = value => typeof value === 'string' && value.trim() !== '' && /^[%_\s]+$/.test(value);
+		if ([sendName, sendEmail, toEmail, subject].some(onlyWildcard)) {
+			throw new BizError(t('paramError'));
+		}
 
 		let right = type === 'left' || type === 'include'
 		let left = type === 'include'
@@ -1445,20 +1506,21 @@ const emailService = {
 			return;
 		}
 
-		await attService.removeByEmailIds(c, emailIds);
-
-		await orm(c).delete(email).where(conditions.length > 1 ? and(...conditions) : conditions[0]).run();
+		await this.deleteByIds(c, emailIds);
 	},
 
 	async physicsDeleteByAccountId(c, accountId) {
 		await attService.removeByAccountId(c, accountId);
+		await c.env.db.prepare('DELETE FROM star WHERE email_id IN (SELECT email_id FROM email WHERE account_id = ?)').bind(accountId).run();
 		await orm(c).delete(email).where(eq(email.accountId, accountId)).run();
 	},
 
 	async read(c, params, userId) {
 		const emailIds = paramUtils.ids(params?.emailIds);
 		// 原代码缺少 .run()，更新语句不会被执行
-		await orm(c).update(email).set({ unread: emailConst.unread.READ }).where(and(eq(email.userId, userId), inArray(email.emailId, emailIds))).run();
+		for (const ids of paramUtils.chunk(emailIds)) {
+			await orm(c).update(email).set({ unread: emailConst.unread.READ }).where(and(eq(email.userId, userId), inArray(email.emailId, ids))).run();
+		}
 	}
 };
 

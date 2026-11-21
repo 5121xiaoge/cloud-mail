@@ -1,4 +1,5 @@
 import BizError from '../error/biz-error';
+import domainUtils from '../utils/domain-uitls';
 import orm from '../entity/orm';
 import { v4 as uuidv4 } from 'uuid';
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
@@ -100,7 +101,7 @@ const publicService = {
 				throw new BizError(t('notEmail'));
 			}
 
-			if (!c.env.domain.includes(emailUtils.getDomain(emailRow.email))) {
+			if (!domainUtils.isOwnDomain(c, emailRow.email)) {
 				throw new BizError(t('notEmailDomain'));
 			}
 

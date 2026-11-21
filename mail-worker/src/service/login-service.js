@@ -1,4 +1,5 @@
 import BizError from '../error/biz-error';
+import domainUtils from '../utils/domain-uitls';
 import userService from './user-service';
 import emailUtils from '../utils/email-utils';
 import { isDel, settingConst, userConst } from '../const/entity-const';
@@ -71,7 +72,7 @@ const loginService = {
 			throw new BizError(t('pwdMinLength'));
 		}
 
-		if (!c.env.domain.includes(emailUtils.getDomain(email))) {
+		if (!domainUtils.isOwnDomain(c, email)) {
 			throw new BizError(t('notEmailDomain'));
 		}
 

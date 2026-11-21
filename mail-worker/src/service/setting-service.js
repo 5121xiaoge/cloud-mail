@@ -11,12 +11,18 @@ import verifyRecordService from './verify-record-service';
 import userContext from '../security/user-context';
 import adminMode from '../security/admin-mode';
 import domainUtils from '../utils/domain-uitls';
+import { sanitizeEmailHtml } from '../utils/html-sanitize';
 
 // 允许通过 /setting/set 修改的字段（与 setting 表一致），其余字段一律忽略
 const SETTABLE_FIELDS = Object.keys(setting).filter(key => key !== 'background' && setting[key] && typeof setting[key] === 'object' && 'columnType' in setting[key]);
 
 // 背景图只允许常见位图，禁止 SVG 等可执行内容
 const BACKGROUND_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif', 'image/avif'];
+
+// 敏感字段：查询时只返回遮掩值；保存时忽略仍带遮掩标记的值，避免前端回传遮掩值覆盖真实密钥
+const MASK = '******';
+const SECRET_FIELDS = ['secretKey', 's3AccessKey', 's3SecretKey', 'tgBotToken', 'webhookSecret', 'linuxdoClientSecret', 'githubClientSecret', 'googleClientSecret'];
+const maskValue = (value, keep) => value ? `${String(value).slice(0, keep)}${MASK}` : value;
 
 const settingService = {
 
@@ -100,15 +106,19 @@ const settingService = {
 			verifyRecordService.selectListByIP(c)
 		]);
 
-		settingRow.secretKey = settingRow.secretKey ? `${settingRow.secretKey.slice(0, 6)}******` : null;
+		settingRow.secretKey = maskValue(settingRow.secretKey, 4) || null;
 
 		Object.keys(settingRow.resendTokens).forEach(key => {
-			settingRow.resendTokens[key] = `${settingRow.resendTokens[key].slice(0, 12)}******`;
+			settingRow.resendTokens[key] = maskValue(settingRow.resendTokens[key], 6);
 		});
 
-		settingRow.s3AccessKey = settingRow.s3AccessKey ? `${settingRow.s3AccessKey.slice(0, 12)}******` : null;
-		settingRow.s3SecretKey = settingRow.s3SecretKey ? `${settingRow.s3SecretKey.slice(0, 12)}******` : null;
-		settingRow.tgBotToken = settingRow.tgBotToken ? `${settingRow.tgBotToken.slice(0, 20)}******` : null;
+		settingRow.s3AccessKey = maskValue(settingRow.s3AccessKey, 4) || null;
+		settingRow.s3SecretKey = maskValue(settingRow.s3SecretKey, 2) || null;
+		settingRow.tgBotToken = maskValue(settingRow.tgBotToken, 6) || null;
+		settingRow.webhookSecret = maskValue(settingRow.webhookSecret, 2) || '';
+		settingRow.linuxdoClientSecret = maskValue(settingRow.linuxdoClientSecret, 2) || '';
+		settingRow.githubClientSecret = maskValue(settingRow.githubClientSecret, 2) || '';
+		settingRow.googleClientSecret = maskValue(settingRow.googleClientSecret, 2) || '';
 		settingRow.hasR2 = !!c.env.r2
 		settingRow.hasCfEmail = !!c.env.email
 
@@ -145,6 +155,15 @@ const settingService = {
 				params[key] = input[key];
 			}
 		}
+		for (const key of SECRET_FIELDS) {
+			if (typeof params[key] === 'string' && params[key].includes(MASK)) {
+				delete params[key];
+			}
+		}
+		// 公告以 HTML 形式展示给所有用户，保存前清洗，防止存储型 XSS
+		if (typeof params.noticeContent === 'string') {
+			params.noticeContent = sanitizeEmailHtml(params.noticeContent);
+		}
 		if (settingData.adminOnly) {
 			params.register = settingConst.register.CLOSE;
 			params.loginVerify = settingConst.loginVerify.CLOSE;
@@ -152,7 +171,9 @@ const settingService = {
 			params.githubSwitch = 1;
 			params.googleSwitch = 1;
 		}
-		let resendTokens = { ...settingData.resendTokens, ...(input?.resendTokens || {}) };
+		const inputTokens = Object.fromEntries(Object.entries(input?.resendTokens || {})
+			.filter(([, value]) => !(typeof value === 'string' && value.includes(MASK))));
+		let resendTokens = { ...settingData.resendTokens, ...inputTokens };
 		Object.keys(resendTokens).forEach(domain => {
 			if (!resendTokens[domain]) delete resendTokens[domain];
 		});

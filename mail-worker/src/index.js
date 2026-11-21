@@ -8,6 +8,7 @@ import oauthService from './service/oauth-service';
 import analysisService from './service/analysis-service';
 import { handleWsUpgrade } from './websocket/connect';
 import proxyService from './service/proxy-service';
+import { isPublicObjKey } from './utils/att-headers';
 export { MailHub } from './websocket/hub'; // Durable Object 必须从 Worker 入口导出
 export default {
 	 async fetch(req, env, ctx) {
@@ -32,11 +33,17 @@ export default {
 
 		if (url.pathname.startsWith('/oss/')) {
 			const key = url.pathname.slice('/oss/'.length);
+			if (!isPublicObjKey(key)) {
+				return new Response('Not Found', { status: 404 });
+			}
 			const resp = await r2Service.toObjResp({ env }, key);
 			return resp || new Response('Not Found', { status: 404 });
 		}
 
 		 if (['/static/','/attachments/'].some(p => url.pathname.startsWith(p))) {
+			 if (!isPublicObjKey(url.pathname.substring(1))) {
+				return new Response('Not Found', { status: 404 });
+			}
 			 const resp = await r2Service.toObjResp({ env }, url.pathname.substring(1));
 			 return resp || new Response('Not Found', { status: 404 });
 		 }

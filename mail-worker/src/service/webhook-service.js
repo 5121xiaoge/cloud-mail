@@ -14,6 +14,7 @@ const webhookService = {
 		if (isNaN(retry) || retry < 0) {
 			retry = 0;
 		}
+		retry = Math.min(retry, 5);
 
 		const headers = {
 			'Content-Type': 'application/json'
@@ -39,6 +40,10 @@ const webhookService = {
 		let lastError = '';
 
 		for (let i = 0; i <= retry; i++) {
+			if (i > 0) {
+				// 重试前递增等待，避免瞬间连续请求
+				await new Promise(resolve => setTimeout(resolve, Math.min(1000 * i, 5000)));
+			}
 			try {
 				const res = await fetch(webhookUrl, {
 					method: 'POST',

@@ -6,6 +6,7 @@ import BizError from '../error/biz-error';
 import { toUtc } from '../utils/date-uitil';
 import userService from './user-service';
 import { t } from '../i18n/i18n.js';
+import paramUtils from '../utils/param-utils';
 
 const regKeyService = {
 
@@ -47,7 +48,7 @@ const regKeyService = {
 
 	async delete(c, params) {
 		let {regKeyIds} = params;
-		regKeyIds = regKeyIds.split(',').map(id => Number(id));
+		regKeyIds = paramUtils.ids(regKeyIds, 90);
 		await orm(c).delete(regKey).where(inArray(regKey.regKeyId,regKeyIds)).run();
 	},
 

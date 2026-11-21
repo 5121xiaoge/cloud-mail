@@ -12,6 +12,7 @@ import settingService from "./setting-service";
 import { sleep } from '../utils/time-utils';
 import proxyService from './proxy-service';
 import { isDangerousAttType } from '../utils/att-headers';
+import paramUtils from '../utils/param-utils';
 
 const attService = {
 
@@ -45,7 +46,10 @@ const attService = {
 
 		}
 
-		await orm(c).insert(att).values(attachments).run();
+		// D1 单条语句最多 100 个绑定参数，附件多时分批插入
+		for (const rows of paramUtils.chunk(attachments, 5)) {
+			await orm(c).insert(att).values(rows).run();
+		}
 	},
 
 	list(c, params, userId) {
@@ -186,7 +190,9 @@ const attService = {
 			attDataList.push(attData);
 		}
 
-		await orm(c).insert(att).values(attDataList).run();
+		for (const rows of paramUtils.chunk(attDataList, 5)) {
+			await orm(c).insert(att).values(rows).run();
+		}
 
 		for (let att of attList) {
 			await r2Service.putObj(c, att.key, att.buff, {
@@ -215,16 +221,18 @@ const attService = {
 			delete attData.buff;
 		}
 
-		await orm(c).insert(att).values(attDataList).run();
+		for (const rows of paramUtils.chunk(attDataList, 5)) {
+			await orm(c).insert(att).values(rows).run();
+		}
 
 	},
 
 	async removeByUserIds(c, userIds) {
-		await this.removeAttByField(c, 'user_id', userIds);
+		await this.removeAttByField(c, att.userId, userIds);
 	},
 
 	async removeByEmailIds(c, emailIds) {
-		await this.removeAttByField(c, 'email_id', emailIds);
+		await this.removeAttByField(c, att.emailId, emailIds);
 	},
 
 	selectByEmailIds(c, emailIds) {
@@ -236,33 +244,26 @@ const attService = {
 			.all();
 	},
 
-	async removeAttByField(c, fieldName, fieldValues) {
+	async removeAttByField(c, column, fieldValues) {
 
-		const sqlList = [];
+		const keys = new Set();
 
-		fieldValues.forEach(value => {
+		// 分批查询并删除附件记录（D1 单条语句最多绑定 100 个参数）
+		for (const values of paramUtils.chunk(fieldValues)) {
+			const rows = await orm(c).select({ key: att.key }).from(att).where(inArray(column, values)).all();
+			rows.forEach(row => keys.add(row.key));
+			await orm(c).delete(att).where(inArray(column, values)).run();
+		}
 
-			sqlList.push(
+		// 同一文件可能被多封邮件引用（按内容哈希去重），只删除已没有任何引用的文件
+		const keyList = [...keys];
+		const stillUsed = new Set();
+		for (const batch of paramUtils.chunk(keyList)) {
+			const rows = await orm(c).select({ key: att.key }).from(att).where(inArray(att.key, batch)).all();
+			rows.forEach(row => stillUsed.add(row.key));
+		}
 
-				c.env.db.prepare(
-					`SELECT a.key, a.att_id
-						FROM attachments a
-							   JOIN (SELECT key
-									 FROM attachments
-									 GROUP BY key
-									 HAVING COUNT (*) = 1) t
-									ON a.key = t.key
-						WHERE a.${fieldName} = ?;`
-					).bind(value)
-			)
-
-			sqlList.push(c.env.db.prepare(`DELETE FROM attachments WHERE ${fieldName} = ?`).bind(value))
-
-		});
-
-		const attListResult = await c.env.db.batch(sqlList);
-
-		const delKeyList = attListResult.flatMap(r => r.results ? r.results.map(row => row.key) : []);
+		const delKeyList = keyList.filter(key => !stillUsed.has(key));
 
 		if (delKeyList.length > 0) {
 			try {
@@ -287,7 +288,7 @@ const attService = {
 	},
 
 	async removeByAccountId(c, accountId) {
-		await this.removeAttByField(c, "account_id", [accountId])
+		await this.removeAttByField(c, att.accountId, [accountId])
 	},
 
 	selectOneByKeys(c, keys) {

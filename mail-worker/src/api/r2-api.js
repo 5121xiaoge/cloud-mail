@@ -1,11 +1,12 @@
 import r2Service from '../service/r2-service';
 import app from '../hono/hono';
 import fileUtils from '../utils/file-utils';
+import { isPublicObjKey } from '../utils/att-headers';
 
 app.get('/oss/*', async (c) => {
 	const key = c.req.path.split('/oss/')[1];
 
-	if (!key) {
+	if (!key || !isPublicObjKey(key)) {
 		return c.text('Not Found', 404);
 	}
 

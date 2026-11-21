@@ -22,14 +22,25 @@ function getSecret(c) {
 	return String(secret);
 }
 
+// 同一 isolate 内复用导入的密钥，避免每次请求重复 importKey
+const keyCache = new Map();
+
 function hmacKey(c, usage) {
-	return crypto.subtle.importKey(
-		'raw',
-		encoder.encode(getSecret(c)),
-		{ name: 'HMAC', hash: 'SHA-256' },
-		false,
-		[usage]
-	);
+	const secret = getSecret(c);
+	const cacheKey = usage + ':' + secret;
+	let key = keyCache.get(cacheKey);
+	if (!key) {
+		key = crypto.subtle.importKey(
+			'raw',
+			encoder.encode(secret),
+			{ name: 'HMAC', hash: 'SHA-256' },
+			false,
+			[usage]
+		);
+		keyCache.set(cacheKey, key);
+		key.catch(() => keyCache.delete(cacheKey));
+	}
+	return key;
 }
 
 const jwtUtils = {

@@ -34,7 +34,8 @@ const telegramService = {
 			if (emailRow.content) {
 				// Telegram 网页预览：外链图改成 /proxy?url=，避免暴露打开者 IP。
 				const html = await proxyService.rewriteHtml(c, emailRow.content);
-				return emailHtmlTemplate(html || '')
+				const { r2Domain } = await settingService.query(c);
+				return emailHtmlTemplate(html || '', r2Domain)
 			} else {
 				return emailTextTemplate(emailRow.text || '')
 			}
@@ -49,7 +50,7 @@ const telegramService = {
 
 		const { tgBotToken, tgChatId, customDomain, tgMsgTo, tgMsgFrom, tgMsgText } = await settingService.query(c);
 
-		const tgChatIds = tgChatId.split(',');
+		const tgChatIds = tgChatId.split(',').map(item => item.trim()).filter(Boolean);
 
 		// 查看链接 30 天后失效
 		const jwtToken = await jwtUtils.generateToken(c, { emailId: email.emailId }, 60 * 60 * 24 * 30)

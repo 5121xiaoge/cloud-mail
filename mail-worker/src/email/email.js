@@ -13,6 +13,7 @@ import telegramService from '../service/telegram-service';
 import aiService from '../service/ai-service';
 import webhookService from '../service/webhook-service';
 import { notifyMailWs } from '../websocket/notify';
+import adminMode from '../security/admin-mode';
 
 export async function email(message, env, ctx) {
 
@@ -72,10 +73,10 @@ export async function email(message, env, ctx) {
 		let userRow = {}
 
 		if (account) {
-			 userRow = await userService.selectByIdIncludeDel({ env: env }, account.userId);
+			 userRow = (await userService.selectByIdIncludeDel({ env: env }, account.userId)) || {};
 		}
 
-		if (account && userRow.email !== env.admin) {
+		if (account && !adminMode.isAdmin({ env }, userRow.email)) {
 
 			let { banEmail, availDomain } = await roleService.selectByUserId({ env: env }, account.userId);
 
@@ -84,7 +85,7 @@ export async function email(message, env, ctx) {
 				return;
 			}
 
-			if(roleService.isBanEmail(banEmail, email.from.address)) {
+			if(roleService.isBanEmail(banEmail, email.from?.address || '')) {
 				message.setReject('The recipient is disabled from receiving emails.');
 				return;
 			}
@@ -161,15 +162,18 @@ export async function email(message, env, ctx) {
 			}
 		}
 
+		// TG / Webhook 推送放到后台执行，不阻塞收信流程
+		const background = [];
+
 		//转发到TG
 		if (tgBotStatus === settingConst.tgBotStatus.OPEN && tgChatId) {
-			await telegramService.sendEmailToBot({ env }, emailRow)
+			background.push(telegramService.sendEmailToBot({ env }, emailRow));
 		}
 
 		//转发到其他邮箱
 		if (forwardStatus === settingConst.forwardStatus.OPEN && forwardEmail) {
 
-			const emails = forwardEmail.split(',');
+			const emails = forwardEmail.split(',').map(item => item.trim()).filter(Boolean);
 
 			await Promise.all(emails.map(async email => {
 
@@ -185,7 +189,18 @@ export async function email(message, env, ctx) {
 
 		//转发到 Webhook
 		if (webhookStatus === settingConst.webhookStatus.OPEN && webhookUrl) {
-			await webhookService.sendEmail({ env }, emailRow, webhookUrl, webhookRetry, webhookSecret);
+			background.push(webhookService.sendEmail({ env }, emailRow, webhookUrl, webhookRetry, webhookSecret));
+		}
+
+		if (background.length > 0) {
+			const task = Promise.allSettled(background).then(results => results
+				.filter(item => item.status === 'rejected')
+				.forEach(item => console.error('邮件推送失败：', item.reason)));
+			if (ctx && typeof ctx.waitUntil === 'function') {
+				ctx.waitUntil(task);
+			} else {
+				await task;
+			}
 		}
 
 	} catch (e) {
@@ -196,9 +211,11 @@ export async function email(message, env, ctx) {
 
 function checkBlock(blackSubjectStr, blackContentStr, blackFromStr, email) {
 
-	const blackFromList = blackFromStr ? blackFromStr.split(',') : []
-	const blackContentList = blackContentStr ? blackContentStr.split(',') : []
-	const blackSubjectList = blackSubjectStr ? blackSubjectStr.split(',') : []
+	const toList = str => str ? String(str).split(',').map(item => item.trim()).filter(Boolean) : [];
+	const blackFromList = toList(blackFromStr).map(item => item.toLowerCase())
+	const blackContentList = toList(blackContentStr)
+	const blackSubjectList = toList(blackSubjectStr)
+	const fromAddress = String(email.from?.address || '').toLowerCase()
 
 	for (const blackSubject of blackSubjectList) {
 		if (email.subject?.includes(blackSubject)) {
@@ -213,7 +230,7 @@ function checkBlock(blackSubjectStr, blackContentStr, blackFromStr, email) {
 	}
 
 	for (const blackFrom of blackFromList) {
-		if (email.from.address === blackFrom || emailUtils.getDomain(email.from.address) === blackFrom) {
+		if (fromAddress && (fromAddress === blackFrom || emailUtils.getDomain(fromAddress) === blackFrom)) {
 			return true
 		}
 	}

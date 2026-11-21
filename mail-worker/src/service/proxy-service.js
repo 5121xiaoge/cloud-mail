@@ -11,6 +11,8 @@ const PROXY_MEDIA_TYPES = new Set([
 const PROXY_IP_PLACEHOLDER = '192.0.2.1';
 const PROXY_LINK_TTL = 3600;
 const encoder = new TextEncoder();
+// 缓存派生出的图片代理密钥，避免每次请求重复派生
+let signingKeyCache = { secret: null, key: null };
 
 const proxyService = {
 
@@ -127,11 +129,16 @@ const proxyService = {
 		if (!env.jwt_secret) {
 			throw new Error('Missing jwt_secret for image proxy');
 		}
+		if (signingKeyCache.secret === env.jwt_secret) {
+			return signingKeyCache.key;
+		}
 		const algorithm = { name: 'HMAC', hash: 'SHA-256' };
 		const root = await crypto.subtle.importKey('raw', encoder.encode(env.jwt_secret), algorithm, false, ['sign']);
 		// 从现有部署密钥派生图片代理专用密钥。
 		const key = await crypto.subtle.sign('HMAC', root, encoder.encode('cloud-mail/image-proxy/v1'));
-		return crypto.subtle.importKey('raw', key, algorithm, false, ['sign', 'verify']);
+		const derived = await crypto.subtle.importKey('raw', key, algorithm, false, ['sign', 'verify']);
+		signingKeyCache = { secret: env.jwt_secret, key: derived };
+		return derived;
 	},
 
 	signatureInput(url, exp) {

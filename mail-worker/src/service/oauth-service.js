@@ -101,8 +101,9 @@ const oauthService = {
 		userInfo = await userRes.json();
 
 		userInfo.oauthUserId = String(userInfo.id);
-		userInfo.active = userInfo.active ? 0 : 1;
-		userInfo.silenced = userInfo.active ? 0 : 1;
+		const { active, silenced } = userInfo;
+		userInfo.active = active ? 0 : 1;
+		userInfo.silenced = silenced ? 0 : 1;
 		userInfo.trustLevel = userInfo.trust_level;
 		userInfo.avatar = userInfo.avatar_url;
 

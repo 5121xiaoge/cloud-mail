@@ -60,3 +60,22 @@ function toAttachmentDisposition(disposition) {
 	}
 	return `attachment; ${value}`;
 }
+
+
+// 公开访问（/oss、/attachments、/static）只允许附件与静态资源前缀，
+// 防止通过对象路径读取 KV 中的设置、会话、公开 API token 等系统数据
+export function isPublicObjKey(key) {
+	if (typeof key !== 'string' || !key || key.length > 1024) {
+		return false;
+	}
+	let decoded;
+	try {
+		decoded = decodeURIComponent(key);
+	} catch {
+		return false;
+	}
+	if (/\.\.|\\|\0/.test(decoded) || decoded.startsWith('/')) {
+		return false;
+	}
+	return decoded.startsWith('attachments/') || decoded.startsWith('static/');
+}

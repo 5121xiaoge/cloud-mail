@@ -20,6 +20,15 @@ const paramUtils = {
 		return this.ids(value, 1)[0];
 	},
 
+	// D1 单条语句最多绑定 100 个参数，批量 IN 查询需要分批
+	chunk(list, size = 90) {
+		const result = [];
+		for (let i = 0; i < list.length; i += size) {
+			result.push(list.slice(i, i + size));
+		}
+		return result;
+	},
+
 	page(num, size, maxSize = 50, defSize = 20) {
 		num = Number(num);
 		size = Number(size);

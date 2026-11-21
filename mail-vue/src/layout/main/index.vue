@@ -15,6 +15,7 @@
   </div>
 </template>
 <script setup>
+import DOMPurify from 'dompurify'
 import account from '@/layout/account/index.vue'
 import {useUiStore} from "@/store/ui.js";
 import {useSettingStore} from "@/store/setting.js";
@@ -82,18 +83,19 @@ function showNotice(data) {
     elNotification.close()
   }
 
-  const style = document.createElement('style');
-  style.innerHTML = `
-  .custom-notice.el-notification {
-    --el-notification-width: min(${data.noticeWidth}px,calc(100% - 30px)) !important;
+  // 宽度强制为数字，复用同一个 style 节点，避免每次弹出都插入新标签
+  const width = Math.max(100, Math.min(2000, Number(data.noticeWidth) || 400))
+  let style = document.getElementById('custom-notice-style')
+  if (!style) {
+    style = document.createElement('style')
+    style.id = 'custom-notice-style'
+    document.head.appendChild(style)
   }
-  `;
-
-  document.head.appendChild(style);
+  style.textContent = `.custom-notice.el-notification { --el-notification-width: min(${width}px,calc(100% - 30px)) !important; }`
 
   elNotification = ElNotification({
     title: data.noticeTitle,
-    message: `<div style="width: 100%;height: 100%;">${data.noticeContent}</div>`,
+    message: `<div style="width: 100%;height: 100%;">${DOMPurify.sanitize(data.noticeContent || '')}</div>`,
     type: data.noticeType === 'none' ? '' : data.noticeType,
     duration: data.noticeDuration,
     position: data.noticePosition,

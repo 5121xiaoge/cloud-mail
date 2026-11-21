@@ -1,8 +1,13 @@
 import fileUtils from '../utils/file-utils';
+import { isPublicObjKey } from '../utils/att-headers';
 
 const kvObjService = {
 
 	async putObj(c, key, content, metadata) {
+		// 文件与系统数据共用 KV，只允许写入附件 / 静态资源前缀
+		if (!isPublicObjKey(key)) {
+			throw new Error('Invalid object key');
+		}
 		await c.env.kv.put(key, content, { metadata: metadata });
 	},
 
@@ -12,6 +17,8 @@ const kvObjService = {
 			keys = [keys];
 		}
 
+		keys = keys.filter(isPublicObjKey);
+
 		if (keys.length === 0) {
 			return;
 		}
@@ -20,6 +27,9 @@ const kvObjService = {
 	},
 
 	async getObj(c, key) {
+		if (!isPublicObjKey(key)) {
+			return null;
+		}
 		const obj = await c.env.kv.getWithMetadata(key, { type: "arrayBuffer"});
 		if (!obj.value) {
 			return null;
