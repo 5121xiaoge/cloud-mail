@@ -1,4 +1,4 @@
-import { canWatchAllEmail, getWsUser, hasValidWsOrigin } from './auth';
+import { canWatchAllEmail, getWsSession, hasValidWsOrigin } from './auth';
 import { ALL_EMAIL_HUB } from './notify';
 import constant from '../const/constant';
 
@@ -19,7 +19,8 @@ export async function handleWsUpgrade(request, env) {
 
 	const url = new URL(request.url);
 	const token = url.searchParams.get('token') || request.headers.get(constant.TOKEN_HEADER);
-	const user = await getWsUser(env, token);
+	const wsSession = await getWsSession(env, token);
+	const user = wsSession?.user;
 	const scope = url.searchParams.get('scope') || 'inbox';
 
 	// Origin 不合法、未登录、无全部邮件权限，一律按 401 用 4401 关掉。
@@ -32,7 +33,11 @@ export async function handleWsUpgrade(request, env) {
 
 	const hubName = scope === 'all-email' ? ALL_EMAIL_HUB : String(user.userId);
 	const stub = env.ws.getByName(hubName);
-	return stub.fetch(new Request('https://mail-ws/connect', request));
+	// 把用户和会话传给 Durable Object 打标签（覆盖客户端可能伪造的同名头）
+	const headers = new Headers(request.headers);
+	headers.set('X-Ws-User', String(user.userId));
+	headers.set('X-Ws-Session', String(wsSession.session || ''));
+	return stub.fetch(new Request('https://mail-ws/connect', { method: request.method, headers }));
 }
 
 // 先 Upgrade 再告诉客户端失败，关闭码 4401。

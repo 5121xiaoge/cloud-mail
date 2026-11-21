@@ -253,7 +253,20 @@ button, input, select, textarea {
     --el-input-text-color: var(--el-text-color-primary) !important;
 }
 
-/* 视图过渡，基于径向剪裁 */
+/* 视图过渡，基于径向剪裁（参数由 utils/theme-transition.js 写入） */
+:root {
+    --vt-duration: 520ms;
+    --vt-easing: ease-out;
+}
+
+/* 主题切换动画期间关闭颜色过渡，避免新画面边揭开边渐变 */
+html.theme-switching,
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after {
+    transition: none !important;
+}
+
 html.dark,
 html:not(.dark) {
     view-transition-name: root;
@@ -274,13 +287,13 @@ html[data-theme-to="light"]::view-transition-new(root) { z-index: 1; }
 /* 切到暗色：新视图从点击点向外扩散 */
 html[data-theme-to="dark"]::view-transition-new(root) {
     clip-path: circle(0px at var(--vt-x) var(--vt-y));
-    animation: vt-radial-in var(--vt-duration) var(--vt-easing) forwards;
+    animation: vt-radial-in var(--vt-duration) var(--vt-easing) both;
 }
 
 /* 切到浅色：旧视图向点击点收缩 */
 html[data-theme-to="light"]::view-transition-old(root) {
     clip-path: circle(var(--vt-end-radius, 0px) at var(--vt-x) var(--vt-y));
-    animation: vt-radial-out var(--vt-duration) var(--vt-easing) forwards;
+    animation: vt-radial-out var(--vt-duration) var(--vt-easing) both;
 }
 
 @keyframes vt-radial-in {

@@ -34,6 +34,8 @@ export const emailBriefColumns = {
 	unread: email.unread,
 	createTime: email.createTime,
 	isDel: email.isDel,
-	content: sql`CASE WHEN trim(coalesce(${email.text}, '')) != '' THEN NULL ELSE ${sqlStripWhitespace(email.content)} END`.as('content'),
-	text: sql`substr(coalesce(${email.text}, ''), 1, ${EMAIL_LIST_TEXT_LEN})`.as('text'),
+	listText: email.listText,
+	// 已有入库摘要时不再读取正文，减少数据量与 CPU
+	content: sql`CASE WHEN coalesce(${email.listText}, '') != '' OR trim(coalesce(${email.text}, '')) != '' THEN NULL ELSE ${sqlStripWhitespace(email.content)} END`.as('content'),
+	text: sql`CASE WHEN coalesce(${email.listText}, '') != '' THEN '' ELSE substr(coalesce(${email.text}, ''), 1, ${EMAIL_LIST_TEXT_LEN}) END`.as('text'),
 };

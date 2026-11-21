@@ -1,5 +1,5 @@
 import BizError from '../error/biz-error';
-import domainUtils from '../utils/domain-uitls';
+import domainUtils from '../utils/domain-utils';
 import userService from './user-service';
 import emailUtils from '../utils/email-utils';
 import { isDel, settingConst, userConst } from '../const/entity-const';
@@ -17,11 +17,12 @@ import turnstileService from './turnstile-service';
 import roleService from './role-service';
 import regKeyService from './reg-key-service';
 import dayjs from 'dayjs';
-import { toUtc } from '../utils/date-uitil';
+import { toUtc } from '../utils/date-util';
 import { t } from '../i18n/i18n.js';
 import verifyRecordService from './verify-record-service';
 import loginGuard from '../security/login-guard';
 import adminMode from '../security/admin-mode';
+import { revokeWsSessionsFromContext } from '../websocket/notify';
 
 const loginService = {
 
@@ -64,7 +65,7 @@ const loginService = {
 			throw new BizError(t('emailLengthLimit'));
 		}
 
-		if (password.length > 30) {
+		if (password.length > 128) {
 			throw new BizError(t('pwdLengthLimit'));
 		}
 
@@ -178,9 +179,7 @@ const loginService = {
 
 	},
 
-	async registerVerify() {
 
-	},
 
 	async handleOpenRegKey(c, regKey, code) {
 
@@ -301,14 +300,16 @@ const loginService = {
 		const { password: _pwd, salt: _salt, ...safeUser } = userRow;
 
 		const uuid = uuidv4();
-		const jwt = await JwtUtils.generateToken(c, { userId: userRow.userId, token: uuid, gen: constant.AUTH_GEN }, constant.TOKEN_EXPIRE);
+		const jwt = await JwtUtils.generateToken(c, { userId: userRow.userId, token: uuid, gen: constant.AUTH_GEN, purpose: 'login' }, constant.TOKEN_EXPIRE);
 
 		let authInfo = await c.env.kv.get(KvConst.AUTH_INFO + userRow.userId, { type: 'json' });
 
 		if (authInfo && (authInfo.user.email === userRow.email)) {
 
 			if (authInfo.tokens.length >= 10) {
-				authInfo.tokens.shift();
+				// 超过 10 个会话时挤掉最早的一个，同时断开它的实时连接
+				const evicted = authInfo.tokens.shift();
+				revokeWsSessionsFromContext(c, userRow.userId, [evicted]);
 			}
 
 			authInfo.tokens.push(uuid);
@@ -340,6 +341,7 @@ const loginService = {
 		}
 		authInfo.tokens = authInfo.tokens.filter(item => item !== token);
 		await c.env.kv.put(KvConst.AUTH_INFO + userId, JSON.stringify(authInfo), { expirationTtl: constant.TOKEN_EXPIRE });
+		revokeWsSessionsFromContext(c, userId, [token]);
 	}
 
 };

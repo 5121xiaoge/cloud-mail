@@ -182,6 +182,7 @@
 </template>
 
 <script setup>
+import {toggleTheme} from '@/utils/theme-transition.js'
 import router from "@/router";
 import {computed, nextTick, reactive, ref, watch} from "vue";
 import {login} from "@/request/login.js";
@@ -290,13 +291,8 @@ function toggleLang() {
   settingStore.lang = lang
 }
 
-function toggleDark() {
-  const nextIsDark = !uiStore.dark
-  document.documentElement.setAttribute('class', nextIsDark ? 'dark' : '')
-  const metaTag = document.getElementById('theme-color-meta');
-  const isMobile = !window.matchMedia("(pointer: fine) and (hover: hover)").matches;
-  metaTag?.setAttribute('content', nextIsDark ? (isMobile ? '#141414' : '#000000') : (isMobile ? '#FFFFFF' : '#F1F1F1'));
-  uiStore.dark = nextIsDark
+function toggleDark(e) {
+  toggleTheme(e)
 }
 
 const getFullEmail = (email) => {

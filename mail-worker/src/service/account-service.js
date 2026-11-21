@@ -1,5 +1,5 @@
 import BizError from '../error/biz-error';
-import domainUtils from '../utils/domain-uitls';
+import domainUtils from '../utils/domain-utils';
 import verifyUtils from '../utils/verify-utils';
 import emailUtils from '../utils/email-utils';
 import userService from './user-service';
@@ -270,7 +270,6 @@ const accountService = {
 	},
 
 	async setAllReceive(c, params, userId) {
-		let a = null
 		const { accountId } = params;
 		const accountRow = await this.selectById(c, accountId);
 		if (!accountRow || accountRow.userId !== userId) {

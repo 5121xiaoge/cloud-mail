@@ -1,5 +1,5 @@
 import BizError from '../error/biz-error';
-import domainUtils from '../utils/domain-uitls';
+import domainUtils from '../utils/domain-utils';
 import accountService from './account-service';
 import orm from '../entity/orm';
 import user from '../entity/user';
@@ -24,6 +24,7 @@ import userContext from '../security/user-context';
 import paramUtils from '../utils/param-utils';
 import settingService from './setting-service';
 import starService from './star-service';
+import { revokeWsSessionsFromContext } from '../websocket/notify';
 
 const userService = {
 
@@ -90,8 +91,11 @@ const userService = {
 		const token = await userContext.getToken(c);
 		const authInfo = await c.env.kv.get(KvConst.AUTH_INFO + userId, { type: 'json' });
 		if (authInfo) {
+			const removed = authInfo.tokens.filter(item => item !== token);
 			authInfo.tokens = token ? authInfo.tokens.filter(item => item === token) : [];
 			await c.env.kv.put(KvConst.AUTH_INFO + userId, JSON.stringify(authInfo), { expirationTtl: constant.TOKEN_EXPIRE });
+			// 其它设备的会话已失效，同时断开它们的实时连接
+			revokeWsSessionsFromContext(c, userId, removed);
 		}
 	},
 
@@ -101,7 +105,7 @@ const userService = {
 			throw new BizError(t('pwdMinLength'));
 		}
 
-		if (password.length > 30) {
+		if (password.length > 128) {
 			throw new BizError(t('pwdLengthLimit'));
 		}
 
@@ -124,6 +128,7 @@ const userService = {
 	async clearSessions(c, userIds) {
 		const ids = Array.isArray(userIds) ? userIds : [userIds];
 		await Promise.all(ids.map(id => c.env.kv.delete(KvConst.AUTH_INFO + id)));
+		ids.forEach(id => revokeWsSessionsFromContext(c, id));
 	},
 
 	async updatePasswordHash(c, userId, hash, salt) {
@@ -139,8 +144,10 @@ const userService = {
 		if (!authInfo) {
 			return;
 		}
+		const removed = authInfo.tokens.filter(item => item !== sessionToken);
 		authInfo.tokens = sessionToken ? [sessionToken] : [];
 		await c.env.kv.put(KvConst.AUTH_INFO + userId, JSON.stringify(authInfo), { expirationTtl: constant.TOKEN_EXPIRE });
+		revokeWsSessionsFromContext(c, userId, removed);
 	},
 
 	selectByEmail(c, email) {
@@ -177,10 +184,12 @@ const userService = {
 		if (syncDelete === settingConst.syncDelete.OPEN) {
 			await this.physicsDelete(c, { userIds: String(userId) });
 			await c.env.kv.delete(kvConst.AUTH_INFO + userId)
+			revokeWsSessionsFromContext(c, userId);
 			return;
 		}
 		await orm(c).update(user).set({ isDel: isDel.DELETE }).where(eq(user.userId, userId)).run();
 		await c.env.kv.delete(kvConst.AUTH_INFO + userId)
+		revokeWsSessionsFromContext(c, userId);
 	},
 
 	async physicsDelete(c, params) {
@@ -338,6 +347,7 @@ const userService = {
 		await this.assertNotProtected(c, userId);
 		await this.updatePassword(c, password, userId);
 		await c.env.kv.delete(KvConst.AUTH_INFO + userId);
+		revokeWsSessionsFromContext(c, userId);
 	},
 
 	async setStatus(c, params) {
@@ -354,6 +364,7 @@ const userService = {
 
 		if (status === userConst.status.BAN) {
 			await c.env.kv.delete(KvConst.AUTH_INFO + userId);
+			revokeWsSessionsFromContext(c, userId);
 		}
 	},
 
@@ -374,6 +385,9 @@ const userService = {
 			.set({ type })
 			.where(eq(user.userId, userId))
 			.run();
+
+		// 角色变化可能影响“全部邮件”实时通道的权限：让客户端重连并重新鉴权
+		revokeWsSessionsFromContext(c, userId, null, { reconnect: true });
 
 	},
 

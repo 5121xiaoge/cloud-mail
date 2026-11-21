@@ -14,6 +14,7 @@ import aiService from '../service/ai-service';
 import webhookService from '../service/webhook-service';
 import { notifyMailWs } from '../websocket/notify';
 import adminMode from '../security/admin-mode';
+import emailDeliveryService from '../service/email-delivery-service';
 
 export async function email(message, env, ctx) {
 
@@ -43,6 +44,13 @@ export async function email(message, env, ctx) {
 		if (receive === settingConst.receive.CLOSE) {
 			message.setReject('Service suspended');
 			return;
+		}
+
+		// 补齐新增的列，避免部署后还没执行 /api/init 时收信写库失败
+		try {
+			await emailDeliveryService.ensure({ env });
+		} catch {
+			// 忽略，写库失败时会按原逻辑报错
 		}
 
 		const raw = await new Response(message.raw).arrayBuffer();

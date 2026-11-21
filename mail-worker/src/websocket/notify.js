@@ -43,3 +43,34 @@ export function notifyMailWsFromContext(c, emailRow) {
 	}
 	notifyMailWs(c.env, ctx, emailRow);
 }
+
+
+// 会话失效（退出、改密码、封禁、删除等）时断开实时连接。
+// sessions 为空表示该用户的全部连接；reconnect=true 表示让客户端重连以重新鉴权（如权限变化）。
+export function revokeWsSessions(env, ctx, userId, sessions = null, { reconnect = false } = {}) {
+	if (!env?.ws || !userId) {
+		return;
+	}
+	const list = Array.isArray(sessions) ? sessions.filter(Boolean).map(String) : null;
+	if (list && list.length === 0) {
+		return;
+	}
+	const payload = { userId: String(userId), sessions: list, reconnect };
+	const task = Promise.all([String(userId), ALL_EMAIL_HUB].map(name => env.ws.getByName(name).revoke(payload)))
+		.catch(err => console.error('ws revoke failed', err));
+	if (ctx && typeof ctx.waitUntil === 'function') {
+		ctx.waitUntil(task);
+	} else {
+		void task;
+	}
+}
+
+export function revokeWsSessionsFromContext(c, userId, sessions = null, options) {
+	let ctx;
+	try {
+		ctx = c.executionCtx;
+	} catch {
+		ctx = undefined;
+	}
+	revokeWsSessions(c.env, ctx, userId, sessions, options);
+}

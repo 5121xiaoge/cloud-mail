@@ -1,4 +1,5 @@
-import domainUtils from '../utils/domain-uitls';
+import domainUtils from '../utils/domain-utils';
+import { signAttContent } from '../utils/att-sign';
 
 const webhookService = {
 
@@ -32,7 +33,8 @@ const webhookService = {
 			toName: emailRow.toName,
 			subject: emailRow.subject,
 			text: emailRow.text,
-			content: emailRow.content,
+			// 保留 {{domain}} 占位符，附件地址追加 24 小时有效的签名
+			content: await signAttContent(c.env, emailRow.content, { keepPlaceholder: true }),
 			code: emailRow.code,
 			createTime: emailRow.createTime
 		});

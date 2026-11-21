@@ -17,7 +17,7 @@
           :name="groupName"
           :value="option.dark"
           :checked="uiStore.dark === option.dark"
-          @change="changeDark(option.dark)"
+          @change="changeDark(option.dark, $event)"
         >
       </span>
     </label>
@@ -28,6 +28,7 @@
 import {useId} from 'vue'
 import {useI18n} from 'vue-i18n'
 import {useUiStore} from '@/store/ui.js'
+import {toggleTheme} from '@/utils/theme-transition.js'
 
 const {t} = useI18n()
 const uiStore = useUiStore()
@@ -37,17 +38,9 @@ const themeOptions = [
   {label: 'darkTheme', dark: true},
 ]
 
-function changeDark(nextIsDark) {
-  if (nextIsDark === uiStore.dark) return
-
-  const root = document.documentElement
-  root.classList.toggle('dark', nextIsDark)
-  const isMobile = !window.matchMedia("(pointer: fine) and (hover: hover)").matches
-  document.getElementById('theme-color-meta')?.setAttribute(
-    'content',
-    nextIsDark ? (isMobile ? '#141414' : '#000000') : (isMobile ? '#191A23' : '#F1F1F1')
-  )
-  uiStore.dark = nextIsDark
+function changeDark(nextIsDark, event) {
+  // 单选框的 change 事件没有坐标，以所在卡片中心为圆心
+  toggleTheme(event, {dark: nextIsDark, target: event?.target?.closest?.('.theme-card')})
 }
 </script>
 

@@ -1,5 +1,5 @@
 import BizError from '../error/biz-error';
-import domainUtils from '../utils/domain-uitls';
+import domainUtils from '../utils/domain-utils';
 import orm from '../entity/orm';
 import { v4 as uuidv4 } from 'uuid';
 import { and, asc, desc, eq, sql } from 'drizzle-orm';
@@ -19,6 +19,7 @@ import paramUtils from '../utils/param-utils';
 import loginGuard from '../security/login-guard';
 import adminMode from '../security/admin-mode';
 import proxyService from './proxy-service';
+import { signAttContent } from '../utils/att-sign';
 
 const publicService = {
 
@@ -86,6 +87,12 @@ const publicService = {
 		}
 
 		const rows = await query.limit(size).offset(num);
+		// 保留 {{domain}} 占位符兼容调用方，附件地址追加签名（24 小时有效）
+		for (const row of rows) {
+			if (row.content) {
+				row.content = await signAttContent(c.env, row.content, { keepPlaceholder: true });
+			}
+		}
 		// 公开邮件列表也把外链图改成 /proxy?url=。
 		return proxyService.rewriteList(c, rows);
 

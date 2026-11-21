@@ -3,7 +3,7 @@ import regKey from '../entity/reg-key';
 import { inArray, like, eq, desc, sql, or, and, gt } from 'drizzle-orm';
 import roleService from './role-service';
 import BizError from '../error/biz-error';
-import { toUtc } from '../utils/date-uitil';
+import { toUtc } from '../utils/date-util';
 import userService from './user-service';
 import { t } from '../i18n/i18n.js';
 import paramUtils from '../utils/param-utils';
@@ -29,7 +29,7 @@ const regKeyService = {
 		const regKeyRow = await orm(c).select().from(regKey).where(eq(regKey.code, code)).get();
 
 		if (regKeyRow) {
-			throw new BizError(t('isExistRegKye'));
+			throw new BizError(t('isExistRegKey'));
 		}
 
 		const roleRow = await roleService.selectById(c, roleId);

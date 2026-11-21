@@ -144,7 +144,7 @@ const oauthService = {
 	},
 
 	//定时任务凌晨清除未绑定邮箱的oauth用户
-	async clearNoBindOathUser(c) {
+	async clearNoBindOauthUser(c) {
 		await orm(c).delete(oauth).where(eq(oauth.userId, 0)).run();
 	},
 

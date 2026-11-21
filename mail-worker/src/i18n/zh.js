@@ -61,7 +61,7 @@ const zh = {
 	isBanUser: '该邮箱已被禁用',
 	regKeyUseCount: '使用次数不能为空',
 	emptyRegKeyExpire: '有效时间不能为空',
-	isExistRegKye: '注册码已存在',
+	isExistRegKey: '注册码已存在',
 	roleNotExist: '权限身份不存在',
 	notExist: '身份不存在',
 	emptyRoleName: '身份名不能为空',

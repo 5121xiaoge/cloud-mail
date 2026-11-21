@@ -7,12 +7,13 @@ import fileUtils from '../utils/file-utils';
 import { attConst } from '../const/entity-const';
 import { parseHTML } from 'linkedom';
 import { v4 as uuidv4 } from 'uuid';
-import domainUtils from '../utils/domain-uitls';
+import domainUtils from '../utils/domain-utils';
 import settingService from "./setting-service";
 import { sleep } from '../utils/time-utils';
 import proxyService from './proxy-service';
 import { isDangerousAttType } from '../utils/att-headers';
 import paramUtils from '../utils/param-utils';
+import { attUrl } from '../utils/att-sign';
 
 const attService = {
 
@@ -52,10 +53,10 @@ const attService = {
 		}
 	},
 
-	list(c, params, userId) {
+	async list(c, params, userId) {
 		const { emailId } = params;
 
-		return orm(c).select().from(att).where(
+		const rows = await orm(c).select().from(att).where(
 			and(
 				eq(att.emailId, emailId),
 				eq(att.userId, userId),
@@ -63,6 +64,15 @@ const attService = {
 				isNull(att.contentId)
 			)
 		).all();
+		return this.withUrls(c, rows);
+	},
+
+	// 给附件记录加上签名访问地址
+	async withUrls(c, rows) {
+		await Promise.all((rows || []).map(async row => {
+			row.url = await attUrl(c.env, row.key);
+		}));
+		return rows;
 	},
 
 	async toImageUrlHtml(c, content) {
@@ -304,11 +314,19 @@ const attService = {
 			return null;
 		}
 		const marker = 'attachments/';
-		const idx = String(src).indexOf(marker);
+		const value = String(src);
+		const idx = value.indexOf(marker);
 		if (idx === -1) {
 			return null;
 		}
-		return String(src).slice(idx);
+		// 去掉签名参数（?exp=&sig=）和锚点，只保留存储 key
+		let key = value.slice(idx).split(/[?#]/)[0];
+		try {
+			key = decodeURIComponent(key);
+		} catch {
+			// 保留原值
+		}
+		return key;
 	}
 };
 

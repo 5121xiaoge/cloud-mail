@@ -6,6 +6,16 @@ const emailDeliveryService = {
 		let ready = initialization.get(db);
 		if (!ready) {
 			ready = (async () => {
+			// 新版本新增的列：部署后还没执行 /api/init 时自动补上，避免收信、列表因缺列失败
+			try {
+				await db.prepare('SELECT list_text FROM email LIMIT 0').all();
+			} catch {
+				try {
+					await db.prepare("ALTER TABLE email ADD COLUMN list_text TEXT NOT NULL DEFAULT ''").run();
+				} catch {
+					// 表尚未创建（全新安装），交给 /api/init
+				}
+			}
 				const exists = await db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'email_delivery'").first();
 				if (exists) return;
 				// D1 batches are atomic, including the first-time backfill.

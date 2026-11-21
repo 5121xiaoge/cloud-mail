@@ -12,11 +12,9 @@
     <email-search v-if="route.name === 'email' || route.name === 'send'"
                   :store="route.name === 'send' ? sendStore : emailStore" :search-options="searchOptions"/>
     <div class="toolbar">
-      <button type="button" v-if="uiStore.dark" class="sun-icon icon-item" :aria-label="$t('toggleTheme')" :title="$t('toggleTheme')" @click="openDark($event)">
-        <Icon icon="mingcute:sun-fill"/>
-      </button>
-      <button type="button" v-else class="dark-icon icon-item" :aria-label="$t('toggleTheme')" :title="$t('toggleTheme')" @click="openDark($event)">
-        <Icon icon="solar:moon-linear"/>
+      <!-- 同一个按钮切换图标，键盘连续切换时焦点不会丢失 -->
+      <button type="button" class="icon-item" :class="uiStore.dark ? 'sun-icon' : 'dark-icon'" :aria-label="$t('toggleTheme')" :title="$t('toggleTheme')" @click="openDark">
+        <Icon :icon="uiStore.dark ? 'mingcute:sun-fill' : 'solar:moon-linear'"/>
       </button>
       <button type="button" class="notice icon-item" :aria-label="$t('announcement')" :title="$t('announcement')" @click="openNotice">
         <Icon icon="streamline-plump:announcement-megaphone"/>
@@ -90,6 +88,7 @@ import {setExtend} from "@/utils/day.js"
 import EmailSearch from '@/components/email-search/index.vue'
 import {useEmailStore} from '@/store/email.js'
 import {useSendStore} from '@/store/send.js'
+import {toggleTheme} from '@/utils/theme-transition.js'
 
 const {t} = useI18n();
 const route = useRoute();
@@ -206,44 +205,7 @@ function openNotice() {
 }
 
 function openDark(e) {
-
-  const nextIsDark = !uiStore.dark
-  const root = document.documentElement
-
-  if (!document.startViewTransition || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    switchDark(nextIsDark, root);
-    return
-  }
-
-  const x = e.clientX
-  const y = e.clientY
-
-  const maxX = Math.max(x, window.innerWidth - x)
-  const maxY = Math.max(y, window.innerHeight - y)
-  const endRadius = Math.hypot(maxX, maxY)
-
-  // 标记切换目标，供 CSS 选择器使用
-  root.setAttribute('data-theme-to', nextIsDark ? 'dark' : 'light')
-  root.style.setProperty('--vt-x', `${x}px`)
-  root.style.setProperty('--vt-y', `${y}px`)
-  root.style.setProperty('--vt-end-radius', `${endRadius + 10}px`)
-
-  const transition = document.startViewTransition(() => {
-    switchDark(nextIsDark, root);
-  })
-
-  transition.finished.finally(() => {
-    // 清理标记
-    root.removeAttribute('data-theme-to')
-  })
-}
-
-function switchDark(nextIsDark, root) {
-  root.setAttribute('class', nextIsDark ? 'dark' : '')
-  const metaTag = document.getElementById('theme-color-meta');
-  const isMobile =  !window.matchMedia("(pointer: fine) and (hover: hover)").matches;
-  metaTag.setAttribute('content', nextIsDark ? (isMobile ? '#141414' : '#000000') : (isMobile ? '#FFFFFF' : '#F1F1F1'));
-  uiStore.dark = nextIsDark
+  toggleTheme(e)
 }
 
 function openSend() {

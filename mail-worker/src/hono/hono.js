@@ -3,6 +3,7 @@ const app = new Hono();
 
 import result from '../model/result';
 import { cors } from 'hono/cors';
+import emailDeliveryService from '../service/email-delivery-service';
 
 function parseOrigins(value) {
 	if (!value) return [];
@@ -26,6 +27,23 @@ app.use('*', async (c, next) => {
 	await next();
 	c.header('X-Content-Type-Options', 'nosniff');
 	c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+});
+
+// 绑定缺失时直接给出明确提示，不依赖匹配异常信息文字
+app.use('*', async (c, next) => {
+	if (!c.env?.db) {
+		return c.json(result.fail('D1数据库未绑定<br/>D1 database not bound', 502));
+	}
+	if (!c.env?.kv) {
+		return c.json(result.fail('KV数据库未绑定<br/>KV database not bound', 502));
+	}
+	// 每个实例首次请求时补齐新增的表和列（结果会缓存）；全新安装时表还不存在，忽略错误
+	try {
+		await emailDeliveryService.ensure(c);
+	} catch {
+		// 交给 /api/init 初始化
+	}
+	return next();
 });
 
 app.onError((err, c) => {

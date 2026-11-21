@@ -61,7 +61,7 @@ const en = {
 	isBanUser: 'This email has been banned',
 	regKeyUseCount: 'Usage count cannot be empty',
 	emptyRegKeyExpire: 'Valid until time cannot be empty',
-	isExistRegKye: 'Invite code already exists',
+	isExistRegKey: 'Invite code already exists',
 	roleNotExist: 'Role does not exist',
 	notExist: 'Role does not exist',
 	emptyRoleName: 'Role name cannot be empty',

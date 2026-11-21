@@ -10,6 +10,9 @@ const PROXY_MEDIA_TYPES = new Set([
 ]);
 const PROXY_IP_PLACEHOLDER = '192.0.2.1';
 const PROXY_LINK_TTL = 3600;
+// 快速预判正文里是否可能有需要代理的外链图，没有就不解析 HTML（解析是列表最耗 CPU 的部分）。
+// 含 HTML 实体（&#、&colon; 等）时可能藏有编码后的地址，保守地照常解析。
+const MAYBE_REWRITE = /(?:\b(?:src|poster|background|data-src|data-original|data-lazy-src)\s*=\s*["']?\s*(?:https?:)?\/\/|\bsrcset\s*=|url\(\s*["']?\s*(?:https?:)?\/\/|proxy\?|&#|&colon;|&sol;)/i;
 const encoder = new TextEncoder();
 // 缓存派生出的图片代理密钥，避免每次请求重复派生
 let signingKeyCache = { secret: null, key: null };
@@ -177,6 +180,9 @@ const proxyService = {
 
 	// 解析 HTML，把 img/srcset/CSS url 等外链改成带签名的同源代理地址。
 	async applyRewrite(html, rewriteUrl) {
+		if (!MAYBE_REWRITE.test(html)) {
+			return html;
+		}
 		const { document } = parseHTML(html);
 		const updates = [];
 		const rewriteAttr = async (el, attr) => {

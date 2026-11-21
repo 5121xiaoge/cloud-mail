@@ -25,6 +25,8 @@ export const email = sqliteTable('email', {
 	message: text('message'),
 	unread: integer('unread').default(0).notNull(),
 	createTime: text('create_time').default(sql`CURRENT_TIMESTAMP`).notNull(),
-	isDel: integer('is_del').default(0).notNull()
+	isDel: integer('is_del').default(0).notNull(),
+	// 列表摘要，收发信时生成，列表查询不再解析 HTML
+	listText: text('list_text').default('')
 });
 export default email

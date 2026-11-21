@@ -331,8 +331,9 @@ onBeforeUnmount(() => {
   .email-search {
     position: static;
     transform: none;
-    width: 32px;
-    height: 32px;
+    /* 与右侧主题、公告按钮（44×44）同尺寸，避免触屏下按钮被 min-height 撑高后错位 */
+    width: 44px;
+    height: 44px;
     flex-shrink: 0;
     margin-left: auto;
   }
@@ -343,15 +344,24 @@ onBeforeUnmount(() => {
 
   .mobile-search-button {
     display: inline-flex;
-    width: 32px;
-    height: 32px;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    min-height: 44px;
+    margin: 0;
     padding: 0;
     border: none;
+    border-radius: 4px;
+    vertical-align: top;
+    --el-button-text-color: var(--el-text-color-primary);
+    --el-button-hover-text-color: var(--el-text-color-primary);
+    --el-button-active-text-color: var(--el-text-color-primary);
     background: transparent;
     box-shadow: none;
     --el-button-bg-color: transparent;
     --el-button-border-color: transparent;
-    --el-button-hover-bg-color: transparent;
+    --el-button-hover-bg-color: var(--base-fill);
     --el-button-hover-border-color: transparent;
     --el-button-active-bg-color: transparent;
     --el-button-active-border-color: transparent;

@@ -9,6 +9,7 @@ import { t } from '../i18n/i18n'
 import app from '../hono/hono';
 import cryptoUtils from '../utils/crypto-utils';
 import adminMode from './admin-mode';
+import { revokeWsSessionsFromContext } from '../websocket/notify';
 
 const exclude = [
 	'/login',
@@ -62,7 +63,7 @@ const requirePerms = [
 	'/regKey/history'
 ];
 
-const premKey = {
+const permKeyRoutes = {
 	'email:delete': ['/email/delete'],
 	'email:send': ['/email/send'],
 	'account:add': ['/account/add'],
@@ -118,7 +119,8 @@ app.use('*', async (c, next) => {
 
 	const result = await jwtUtils.verifyToken(c, jwt);
 
-	if (!result || (result.gen !== undefined && result.gen !== constant.AUTH_GEN)) {
+	// 只接受登录令牌（旧令牌没有 purpose 字段，按登录令牌处理）
+	if (!result || (result.gen !== undefined && result.gen !== constant.AUTH_GEN) || (result.purpose !== undefined && result.purpose !== 'login')) {
 		throw new BizError(t('authExpired'), 401);
 	}
 
@@ -136,6 +138,7 @@ app.use('*', async (c, next) => {
 	// 超级管理员单用户模式：非管理员的历史会话一律失效
 	if (adminMode.isAdminOnly(c) && !adminMode.isAdmin(c, authInfo.user?.email)) {
 		await c.env.kv.delete(KvConst.AUTH_INFO + userId);
+		revokeWsSessionsFromContext(c, userId);
 		throw new BizError(t('adminOnly'), 401);
 	}
 
@@ -178,7 +181,7 @@ function permKeyToPaths(permKeys) {
 	const paths = [];
 
 	for (const key of permKeys) {
-		const routeList = premKey[key];
+		const routeList = permKeyRoutes[key];
 		if (routeList && Array.isArray(routeList)) {
 			paths.push(...routeList);
 		}

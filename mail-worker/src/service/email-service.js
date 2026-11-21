@@ -19,7 +19,7 @@ import starService from './star-service';
 import dayjs from 'dayjs';
 import kvConst from '../const/kv-const';
 import { t } from '../i18n/i18n'
-import domainUtils from '../utils/domain-uitls';
+import domainUtils from '../utils/domain-utils';
 import account from "../entity/account";
 import { att } from '../entity/att';
 import telegramService from './telegram-service';
@@ -32,6 +32,7 @@ import verifyUtils from '../utils/verify-utils';
 import { notifyMailWsFromContext } from '../websocket/notify';
 import proxyService from './proxy-service';
 import adminMode from '../security/admin-mode';
+import { signAttContent } from '../utils/att-sign';
 
 const emailService = {
 
@@ -91,7 +92,8 @@ const emailService = {
 		}
 
 		// Capture the cursor before the list so concurrent deliveries can still be polled.
-		let latestEmail = await orm(c).select({ ...email, deliveryId: emailDelivery.deliveryId }).from(email)
+		// 总数和最新游标只有首页（emailId=0）需要，翻页时跳过这两次查询
+		let latestEmail = emailId ? null : await orm(c).select({ ...email, deliveryId: emailDelivery.deliveryId }).from(email)
 			.leftJoin(account, eq(account.accountId, email.accountId))
 			.leftJoin(emailDelivery, eq(emailDelivery.emailId, email.emailId)).where(
 				and(
@@ -139,7 +141,7 @@ const emailService = {
 
 		const listQuery = query.limit(size).all();
 
-		const totalQuery = orm(c).select({ total: count() }).from(email)
+		const totalQuery = emailId ? Promise.resolve(null) : orm(c).select({ total: count() }).from(email)
 			.innerJoin(
 				account,
 				eq(account.accountId, email.accountId)
@@ -160,7 +162,7 @@ const emailService = {
 			this.applyListText(list);
 		}
 
-		if (!latestEmail) {
+		if (!latestEmail && !emailId) {
 			latestEmail = {
 				emailId: 0,
 				deliveryId: 0,
@@ -169,7 +171,7 @@ const emailService = {
 			}
 		}
 
-		return { list, total: totalRow.total, latestEmail };
+		return { list, total: totalRow ? totalRow.total : null, latestEmail };
 	},
 
 	toListText(item) {
@@ -179,7 +181,7 @@ const emailService = {
 
 	applyListText(list) {
 		for (const item of list) {
-			item.listText = this.toListText(item);
+			item.listText = item.listText || this.toListText(item);
 			delete item.text;
 			delete item.content;
 		}
@@ -358,6 +360,7 @@ const emailService = {
 	},
 
 	receive(c, params, cidAttList, r2domain) {
+		params.listText = this.toListText({ text: params.text, content: params.content });
 		params.content = this.imgReplace(params.content, cidAttList, r2domain)
 		return orm(c).insert(email).values({ ...params }).returning().get();
 	},
@@ -711,6 +714,7 @@ const emailService = {
 		const emailData = {
 			sendEmail, name, subject, text, accountId, userId,
 			content: this.imgReplace(html, imageDataList, r2Domain),
+			listText: this.toListText({ text, content: html }),
 			status: useCloudflareEmail ? emailConst.status.DELIVERED : emailConst.status.SENT,
 			type: emailConst.type.SEND,
 			resendEmailId: providerId,
@@ -1241,7 +1245,7 @@ const emailService = {
 
 		await this.emailAddAtt(c, list);
 		for (const item of list) {
-			item.listText = this.toListText(item);
+			item.listText = item.listText || this.toListText(item);
 		}
 		return list;
 	},
@@ -1348,8 +1352,8 @@ const emailService = {
 		}
 
 		const listQuery = query.limit(size).all();
-		const totalQuery = queryCount.get();
-		const latestEmailQuery = orm(c).select({
+		const totalQuery = emailId ? Promise.resolve(null) : queryCount.get();
+		const latestEmailQuery = emailId ? Promise.resolve(null) : orm(c).select({
 			emailId: email.emailId,
 			accountId: email.accountId,
 			userId: email.userId,
@@ -1365,7 +1369,7 @@ const emailService = {
 			this.applyListText(list);
 		}
 
-		if (!latestEmail) {
+		if (!latestEmail && !emailId) {
 			latestEmail = {
 				emailId: 0,
 				accountId: 0,
@@ -1373,7 +1377,7 @@ const emailService = {
 			}
 		}
 
-		return { list: list, total: totalRow.total, latestEmail };
+		return { list: list, total: totalRow ? totalRow.total : null, latestEmail };
 	},
 
 	async allEmailLatest(c, params) {
@@ -1393,7 +1397,7 @@ const emailService = {
 
 		await this.emailAddAtt(c, list);
 		for (const item of list) {
-			item.listText = this.toListText(item);
+			item.listText = item.listText || this.toListText(item);
 		}
 		return list;
 	},
@@ -1405,11 +1409,19 @@ const emailService = {
 		if (emailIds.length > 0) {
 
 			const attList = await attService.selectByEmailIds(c, emailIds);
+			await attService.withUrls(c, attList);
 
 			list.forEach(emailRow => {
 				const atts = attList.filter(attRow => attRow.emailId === emailRow.emailId);
 				emailRow.attList = atts;
 			});
+		}
+
+		// 正文里的站内附件换成签名地址
+		for (const item of list) {
+			if (item.content) {
+				item.content = await signAttContent(c.env, item.content);
+			}
 		}
 
 		// 完整邮件查询：给附件后，把正文外链图改成 /proxy?url=。
@@ -1433,7 +1445,7 @@ const emailService = {
 
 		// 收件中途失败、超过 1 天仍处于保存中的邮件不会再完成，清理掉避免数据和附件堆积
 		const stale = await c.env.db.prepare(`SELECT email_id FROM email WHERE status = ${emailConst.status.SAVING}
-			AND create_time < datetime('now', '-1 day') LIMIT 500`).all();
+			AND create_time != '' AND create_time < datetime('now', '-1 day') LIMIT 500`).all();
 		const staleIds = (stale.results || []).map(row => row.email_id);
 		if (staleIds.length > 0) {
 			await this.deleteByIds(c, staleIds);

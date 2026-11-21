@@ -31,7 +31,7 @@ export function isDangerousAttType(contentType) {
 	return /svg|html|xml|javascript|ecmascript/.test(type);
 }
 
-export function publicFileHeaders({ contentType, contentDisposition } = {}) {
+export function publicFileHeaders({ contentType, contentDisposition, cacheControl } = {}) {
 	const type = mimeTypeOf(contentType);
 	const safeInline = SAFE_INLINE_TYPES.has(type);
 	return {
@@ -42,8 +42,9 @@ export function publicFileHeaders({ contentType, contentDisposition } = {}) {
 			? (contentDisposition || 'inline')
 			: toAttachmentDisposition(contentDisposition),
 		'X-Content-Type-Options': 'nosniff',
-		'Content-Security-Policy': 'sandbox',
-		'Cache-Control': ATT_CACHE_CONTROL
+		'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox",
+		'Cross-Origin-Resource-Policy': 'cross-origin',
+		'Cache-Control': cacheControl || ATT_CACHE_CONTROL
 	};
 }
 

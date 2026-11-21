@@ -71,6 +71,12 @@ const dbInit = {
 		} catch (e) {
 			console.warn(`跳过索引：${e.message}`);
 		}
+
+		try {
+			await c.env.db.prepare(`ALTER TABLE email ADD COLUMN list_text TEXT NOT NULL DEFAULT ''`).run();
+		} catch (e) {
+			console.warn(`sql skip:${e.message}`);
+		}
 	},
 
 	async v3_6DB(c) {

@@ -10,7 +10,7 @@ import {t} from '../i18n/i18n'
 import verifyRecordService from './verify-record-service';
 import userContext from '../security/user-context';
 import adminMode from '../security/admin-mode';
-import domainUtils from '../utils/domain-uitls';
+import domainUtils from '../utils/domain-utils';
 import { sanitizeEmailHtml } from '../utils/html-sanitize';
 
 // 允许通过 /setting/set 修改的字段（与 setting 表一致），其余字段一律忽略

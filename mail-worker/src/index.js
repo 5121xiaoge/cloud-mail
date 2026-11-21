@@ -9,6 +9,7 @@ import analysisService from './service/analysis-service';
 import { handleWsUpgrade } from './websocket/connect';
 import proxyService from './service/proxy-service';
 import { isPublicObjKey } from './utils/att-headers';
+import { attAccessAllowed } from './utils/att-sign';
 export { MailHub } from './websocket/hub'; // Durable Object 必须从 Worker 入口导出
 export default {
 	 async fetch(req, env, ctx) {
@@ -31,22 +32,25 @@ export default {
 			return app.fetch(req, env, ctx);
 		}
 
-		if (url.pathname.startsWith('/oss/')) {
-			const key = url.pathname.slice('/oss/'.length);
-			if (!isPublicObjKey(key)) {
+		// 对象存储文件：只允许附件与静态资源前缀；附件需要带有效签名（att_public = true 时不校验）
+		const objPrefix = ['/oss/', '/static/', '/attachments/'].find(prefix => url.pathname.startsWith(prefix));
+		if (objPrefix) {
+			const rawKey = objPrefix === '/oss/' ? url.pathname.slice('/oss/'.length) : url.pathname.substring(1);
+			let key = '';
+			try {
+				key = decodeURIComponent(rawKey);
+			} catch {
+				key = '';
+			}
+			if (!isPublicObjKey(rawKey) || !isPublicObjKey(key)) {
 				return new Response('Not Found', { status: 404 });
+			}
+			if (!await attAccessAllowed(env, key, url.searchParams)) {
+				return new Response('Forbidden', { status: 403 });
 			}
 			const resp = await r2Service.toObjResp({ env }, key);
 			return resp || new Response('Not Found', { status: 404 });
 		}
-
-		 if (['/static/','/attachments/'].some(p => url.pathname.startsWith(p))) {
-			 if (!isPublicObjKey(url.pathname.substring(1))) {
-				return new Response('Not Found', { status: 404 });
-			}
-			 const resp = await r2Service.toObjResp({ env }, url.pathname.substring(1));
-			 return resp || new Response('Not Found', { status: 404 });
-		 }
 
 		return env.assets.fetch(req);
 	},
@@ -67,7 +71,7 @@ export default {
 			['resetDaySendCount', () => userService.resetDaySendCount({ env })],
 			['completeReceiveAll', () => emailService.completeReceiveAll({ env })],
 			['autoClean', () => emailService.autoClean({ env })],
-			['clearNoBindOathUser', () => oauthService.clearNoBindOathUser({ env })],
+			['clearNoBindOauthUser', () => oauthService.clearNoBindOauthUser({ env })],
 			['refreshEchartsCache', () => analysisService.refreshEchartsCache({ env })]
 		];
 

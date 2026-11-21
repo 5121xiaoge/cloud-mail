@@ -11,8 +11,9 @@ import jwtUtils from '../utils/jwt-utils';
 import emailMsgTemplate from '../template/email-msg';
 import emailTextTemplate from '../template/email-text';
 import emailHtmlTemplate from '../template/email-html';
-import domainUtils from "../utils/domain-uitls";
+import domainUtils from "../utils/domain-utils";
 import proxyService from './proxy-service';
+import { signAttContent } from '../utils/att-sign';
 
 const telegramService = {
 
@@ -23,7 +24,7 @@ const telegramService = {
 		const result = await jwtUtils.verifyToken(c, token);
 
 		// 仅接受专用的邮件查看令牌，拒绝登录令牌等其他用途的 JWT
-		if (!result || !result.emailId || result.userId) {
+		if (!result || !result.emailId || result.userId || (result.purpose !== undefined && result.purpose !== 'tg-view')) {
 			return emailTextTemplate('Access denied')
 		}
 
@@ -33,7 +34,7 @@ const telegramService = {
 
 			if (emailRow.content) {
 				// Telegram 网页预览：外链图改成 /proxy?url=，避免暴露打开者 IP。
-				const html = await proxyService.rewriteHtml(c, emailRow.content);
+				const html = await proxyService.rewriteHtml(c, await signAttContent(c.env, emailRow.content));
 				const { r2Domain } = await settingService.query(c);
 				return emailHtmlTemplate(html || '', r2Domain)
 			} else {
@@ -53,7 +54,7 @@ const telegramService = {
 		const tgChatIds = tgChatId.split(',').map(item => item.trim()).filter(Boolean);
 
 		// 查看链接 30 天后失效
-		const jwtToken = await jwtUtils.generateToken(c, { emailId: email.emailId }, 60 * 60 * 24 * 30)
+		const jwtToken = await jwtUtils.generateToken(c, { emailId: email.emailId, purpose: 'tg-view' }, 60 * 60 * 24 * 30)
 
 		const webAppUrl = customDomain ? `${domainUtils.toOssDomain(customDomain)}/api/telegram/getEmail/${jwtToken}` : 'https://www.cloudflare.com/404'
 		const inlineKeyboard = [

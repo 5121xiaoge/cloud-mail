@@ -1,4 +1,4 @@
-import domainUtils from '../utils/domain-uitls';
+import domainUtils from '../utils/domain-utils';
 import { sanitizeEmailHtml } from '../utils/html-sanitize';
 
 // Telegram 中查看邮件的页面：服务端清洗后直接输出，页面不含任何脚本（配合 CSP script-src 'none'）

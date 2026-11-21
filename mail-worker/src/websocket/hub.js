@@ -11,7 +11,13 @@ export class MailHub extends DurableObject {
 		}
 
 		const pair = new WebSocketPair();
-		this.ctx.acceptWebSocket(pair[1]);
+		// 按用户和会话打标签，会话失效时可以只关闭对应连接
+		const tags = [];
+		const userId = request.headers.get('X-Ws-User');
+		const session = request.headers.get('X-Ws-Session');
+		if (userId) tags.push('user:' + userId);
+		if (session) tags.push('session:' + session);
+		this.ctx.acceptWebSocket(pair[1], tags);
 		return new Response(null, { status: 101, webSocket: pair[0] });
 	}
 
@@ -25,6 +31,32 @@ export class MailHub extends DurableObject {
 				try { socket.close(1011, 'Delivery failed'); } catch {}
 			}
 		}
+	}
+
+	// 会话失效时关闭连接：传 sessions 只关闭这些会话，否则关闭该用户的全部连接。
+	// reconnect=true 用于权限变化：普通关闭码，客户端会自动重连并重新鉴权；否则用 4401，客户端停止重连。
+	async revoke({ userId, sessions, reconnect = false } = {}) {
+		const targets = new Set();
+		if (Array.isArray(sessions) && sessions.length > 0) {
+			for (const session of sessions) {
+				this.ctx.getWebSockets('session:' + session).forEach(socket => targets.add(socket));
+			}
+		} else if (userId) {
+			this.ctx.getWebSockets('user:' + userId).forEach(socket => targets.add(socket));
+		}
+		for (const socket of targets) {
+			try {
+				if (reconnect) {
+					socket.close(4000, 'Session refresh');
+				} else {
+					socket.send(JSON.stringify({ type: 'error', code: 401 }));
+					socket.close(4401, 'Session revoked');
+				}
+			} catch {
+				// 连接已断开
+			}
+		}
+		return targets.size;
 	}
 
 	// 处理客户端心跳：ping / { type: 'ping' } 回 pong，避免中间代理掐线。
