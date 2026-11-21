@@ -56,6 +56,7 @@ const routes = [
     },
     {
         path: '/messages',
+        alias: '/message',
         redirect: '/inbox/messages'
     },
     {

@@ -76,7 +76,7 @@ function jumpContent(email) {
   emailStore.contentData.showUnread = true
   emailStore.contentData.showStar = true
   emailStore.contentData.showReply = true
-  router.push('/message')
+  router.push({name: 'content', params: {mailbox: 'inbox'}})
 }
 
 let disposed = false
