@@ -3,6 +3,14 @@ main = "src/index.js"
 compatibility_date = "2025-06-04"
 compatibility_flags = ["nodejs_als"]	#i18n 按请求隔离语言所需
 
+[[durable_objects.bindings]]
+name = "ws"
+class_name = "MailHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MailHub"]
+
 [observability]
 enabled = true
 

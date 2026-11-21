@@ -1,5 +1,5 @@
 <template>
-  <div class="header" :class="!hasPerm('email:send') ? 'not-send' : ''">
+  <div class="header" :class="{ 'not-send': !hasPerm('email:send'), 'has-search': route.name === 'email' || route.name === 'send' }">
     <div class="header-btn">
       <hanburger :is-active="uiStore.asideShow" @click="changeAside"></hanburger>
       <span class="breadcrumb-item">{{ $t(route.meta.title) }}</span>
@@ -9,6 +9,8 @@
         <Icon icon="material-symbols:edit-outline-sharp" width="22" height="22"/>
       </div>
     </button>
+    <email-search v-if="route.name === 'email' || route.name === 'send'"
+                  :store="route.name === 'send' ? sendStore : emailStore" :search-options="searchOptions"/>
     <div class="toolbar">
       <button type="button" v-if="uiStore.dark" class="sun-icon icon-item" :aria-label="$t('toggleTheme')" :title="$t('toggleTheme')" @click="openDark($event)">
         <Icon icon="mingcute:sun-fill"/>
@@ -85,6 +87,9 @@ import {useSettingStore} from "@/store/setting.js";
 import {hasPerm} from "@/perm/perm.js"
 import {useI18n} from "vue-i18n";
 import {setExtend} from "@/utils/day.js"
+import EmailSearch from '@/components/email-search/index.vue'
+import {useEmailStore} from '@/store/email.js'
+import {useSendStore} from '@/store/send.js'
 
 const {t} = useI18n();
 const route = useRoute();
@@ -94,6 +99,15 @@ const uiStore = useUiStore();
 const logoutLoading = ref(false)
 const userInfoShow = ref(false)
 const userinfoRef = ref({})
+const emailStore = useEmailStore()
+const sendStore = useSendStore()
+const searchOptions = computed(() => [
+  {type: 'subject', label: t('subject')},
+  {type: 'content', label: t('searchSummaryContent')},
+  {type: 'sender', label: t('sender')},
+  {type: 'senderAddress', label: t('sendEmailAddress')},
+  {type: 'recipientAddress', label: t('toEmail')},
+])
 
 const accountCount = computed(() => {
   return userStore.user.role.accountCount
@@ -356,6 +370,7 @@ function formatName(email) {
 
 
 .header {
+  position: relative;
   text-align: right;
   font-size: 12px;
   display: grid;
@@ -366,6 +381,12 @@ function formatName(email) {
 
 .header.not-send {
   grid-template-columns: auto 1fr;
+}
+.header.has-search {
+  grid-template-columns: minmax(0, auto) auto minmax(0, 1fr) auto;
+}
+.header.has-search.not-send {
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
 }
 
 .writer-box {

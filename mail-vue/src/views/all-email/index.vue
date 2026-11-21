@@ -105,7 +105,7 @@ import {Icon} from "@iconify/vue";
 import router from "@/router/index.js";
 import {useI18n} from 'vue-i18n';
 import {toUtc} from "@/utils/day.js";
-import {sleep} from "@/utils/time-utils.js";
+import {allEmailWs, isAutoRefreshEnabled} from "@/websocket/client.js";
 import {useSettingStore} from "@/store/setting.js";
 import { useRoute } from 'vue-router'
 
@@ -125,8 +125,13 @@ const showBathDelete = ref(false)
 const clearLoading = ref(false)
 
 onMounted(() => {
-  latest();
+  allEmailWs.start({
+    isEnabled: () => route.name === 'all-email' && isAutoRefreshEnabled(settingStore.settings.autoRefresh),
+    onMessage: scheduleLatest,
+    onReconnect: scheduleLatest,
+  });
 })
+watch(() => [route.name, settingStore.settings.autoRefresh], () => allEmailWs.sync())
 
 const openSelect = () => {
   mySelect.value.toggleMenu()
@@ -297,66 +302,40 @@ function getEmailList(emailId, size, signal) {
 }
 
 let disposed = false
-onUnmounted(() => { disposed = true })
+let pullTimer
+let pulling = false
+let pullAgain = false
+onUnmounted(() => { disposed = true; window.clearTimeout(pullTimer); allEmailWs.stop() })
 
-async function latest() {
-  while (!disposed) {
+function scheduleLatest() {
+  window.clearTimeout(pullTimer)
+  pullTimer = window.setTimeout(pullLatest, 150)
+}
 
-    let autoRefresh = settingStore.settings.autoRefresh;
-
-    await sleep(autoRefresh > 1 ? autoRefresh * 1000 : 3000);
-    if (disposed) break;
-
-    const latestId = sysEmailScroll.value.latestEmail?.emailId
-
-    if (autoRefresh < 2) {
-      continue
+async function pullLatest() {
+  if (pulling) { pullAgain = true; return }
+  if (disposed || route.name !== 'all-email' || sysEmailScroll.value.firstLoad) return
+  if (params.type !== 'receive' || params.userEmail || params.accountEmail || params.name || params.subject) {
+    sysEmailScroll.value.refreshList()
+    return
+  }
+  const signature = JSON.stringify(params)
+  pulling = true
+  try {
+    let list
+    do {
+      list = await allEmailLatest(sysEmailScroll.value.latestEmail?.emailId || 0)
+      if (disposed || route.name !== 'all-email' || signature !== JSON.stringify(params)) return
+      for (const email of list) sysEmailScroll.value.addItem(email)
+    } while (list.length >= 50)
+  } catch (error) {
+    if (error.code === 401 || error.code === 403) {
+      settingStore.settings.autoRefresh = 1
+      allEmailWs.sync()
     }
-
-    if (!latestId && latestId !== 0) {
-      continue
-    }
-
-    if (route.name !== 'all-email') {
-      continue
-    }
-
-
-    if (params.type !== 'receive') {
-      continue
-    }
-
-    try {
-
-      const curTimeSort = params.timeSort
-      let list = await allEmailLatest(latestId)
-
-      if (list.length === 0) {
-        continue
-      }
-
-      if (disposed || params.type !== 'receive') {
-        continue
-      }
-
-      // 确保回来之后条件没变
-      if (params.timeSort !== curTimeSort) {
-        continue
-      }
-
-      for (let email of list) {
-
-        sysEmailScroll.value.addItem(email)
-
-      }
-
-    } catch (e) {
-      if (e.code === 401 || e.code === 403) {
-        settingStore.settings.autoRefresh = 0;
-      }
-      console.error(e)
-    }
-
+  } finally {
+    pulling = false
+    if (pullAgain) { pullAgain = false; scheduleLatest() }
   }
 }
 

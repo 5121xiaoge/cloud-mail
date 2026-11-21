@@ -11,8 +11,8 @@ import jwtUtils from '../utils/jwt-utils';
 import emailMsgTemplate from '../template/email-msg';
 import emailTextTemplate from '../template/email-text';
 import emailHtmlTemplate from '../template/email-html';
-import verifyUtils from '../utils/verify-utils';
 import domainUtils from "../utils/domain-uitls";
+import proxyService from './proxy-service';
 
 const telegramService = {
 
@@ -32,8 +32,9 @@ const telegramService = {
 		if (emailRow) {
 
 			if (emailRow.content) {
-				const { r2Domain } = await settingService.query(c);
-				return emailHtmlTemplate(emailRow.content || '', r2Domain)
+				// Telegram 网页预览：外链图改成 /proxy?url=，避免暴露打开者 IP。
+				const html = await proxyService.rewriteHtml(c, emailRow.content);
+				return emailHtmlTemplate(html || '')
 			} else {
 				return emailTextTemplate(emailRow.text || '')
 			}
@@ -57,7 +58,7 @@ const telegramService = {
 		const inlineKeyboard = [
 			[
 				{
-					text: '查看',
+					text: 'View',
 					web_app: { url: webAppUrl }
 				}
 			]

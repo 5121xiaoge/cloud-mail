@@ -117,6 +117,24 @@ sqlTest('internal delivery matches mixed-case addresses and publishes only compl
     assert.equal(rows[0].status, 0);
 });
 
+sqlTest('internal plus-address delivery notifies only after its mail and attachments are visible', async t => {
+    const fixture = database(t);
+    addAccount(fixture);
+    const notifications = [];
+    fixture.c.env.ws = { getByName: name => ({ notify: async payload => {
+        const row = fixture.sqlite.prepare('SELECT status,is_del FROM email WHERE email_id=?').get(payload.emailId);
+        assert.equal(row.status, 0);
+        assert.equal(row.is_del, 0);
+        assert.equal(fixture.sqlite.prepare('SELECT COUNT(*) AS count FROM attachments WHERE email_id=?').get(payload.emailId).count, 1);
+        notifications.push(name);
+    } }) };
+    await fixture.emailService.HandleOnSiteEmail(fixture.c, ['mixed+tag@example.test'], {
+        emailId: 999, sendEmail: 'sender@example.test', userId: 20, accountId: 2, isDel: 0,
+    }, [{ filename: 'preview.txt', key: 'attachments/preview.txt', size: 1 }]);
+    assert.deepEqual(notifications, ['10', 'all-email']);
+    assert.equal((await poll(fixture, 0)).length, 1);
+});
+
 test('attachment storage retries transient failures without duplicating metadata', async () => {
     let uploads = 0, inserts = 0;
     const service = workerObject('service/att-service.js', 'attService', {

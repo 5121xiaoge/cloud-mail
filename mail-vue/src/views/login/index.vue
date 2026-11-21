@@ -132,20 +132,21 @@
         <form class="auth-form" novalidate @submit.prevent="submit">
           <div class="field">
             <label class="field-label" for="login-email">{{ $t('emailAccount') }}</label>
-            <el-input id="login-email" v-model="form.email" size="large" name="username" autocomplete="username"
-                      :class="{ 'has-append': !hideLoginDomain }" :placeholder="$t('loginPage.enterEmail')">
-              <template #prefix>
-                <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
-                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18"
-                     height="14" rx="2.5"/><path d="m4 7 8 6 8-6"/></svg>
-              </template>
-              <template #append v-if="!hideLoginDomain">
-                <el-select v-model="suffix" size="large" class="domain-select" :style="{ width: domainSelectWidth }"
-                           popper-class="login-domain-popper" :aria-label="$t('select')">
-                  <el-option v-for="item in domainList" :key="item" :label="item" :value="item"/>
-                </el-select>
-              </template>
-            </el-input>
+            <div class="email-control" :class="{ 'with-domain': showDomainSelect }"
+                 :style="{ '--domain-select-width': domainSelectWidth }">
+              <el-input id="login-email" v-model="form.email" size="large" name="username" autocomplete="username"
+                        :placeholder="$t('loginPage.enterEmail')">
+                <template #prefix>
+                  <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+                       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18"
+                       height="14" rx="2.5"/><path d="m4 7 8 6 8-6"/></svg>
+                </template>
+              </el-input>
+              <el-select v-if="showDomainSelect" v-model="suffix" size="large" class="domain-select"
+                         popper-class="login-domain-popper" :aria-label="$t('selectEmail')" :title="suffix">
+                <el-option v-for="item in domainList" :key="item" :label="item" :value="item"/>
+              </el-select>
+            </div>
           </div>
           <div class="field">
             <label class="field-label" for="login-password">{{ $t('password') }}</label>
@@ -173,11 +174,6 @@
                 d="M12 3 5 6v5c0 4.5 3 8.3 7 10 4-1.7 7-5.5 7-10V6l-7-3Z"/></svg>
             {{ $t('loginPage.encrypted') }}
           </span>
-          <a v-if="settingStore.settings.projectLink" href="https://github.com/maillab/cloud-mail" target="_blank"
-             rel="noopener noreferrer" aria-label="GitHub">
-            <Icon icon="mingcute:github-line" width="16" height="16"/>
-            GitHub
-          </a>
         </div>
       </div>
     </main>
@@ -195,7 +191,6 @@ import {useSettingStore} from "@/store/setting.js";
 import {useAccountStore} from "@/store/account.js";
 import {useUserStore} from "@/store/user.js";
 import {useUiStore} from "@/store/ui.js";
-import {Icon} from "@iconify/vue";
 import {cvtR2Url} from "@/utils/convert.js";
 import {loginUserInfo} from "@/request/my.js";
 import {permsToRouter} from "@/perm/perm.js";
@@ -250,6 +245,7 @@ if (new URLSearchParams(window.location.search).has('code')) {
 
 const siteTitle = computed(() => settingStore.settings.title || 'Cloud Mail')
 const hideLoginDomain = computed(() => settingStore.settings.loginDomain === 1)
+const showDomainSelect = computed(() => !hideLoginDomain.value && !form.email.includes('@') && domainList.value.length > 0)
 const hasCustomBg = computed(() => !!settingStore.settings.background)
 
 const domainSelectWidth = computed(() => {
@@ -1031,21 +1027,52 @@ function refreshWebsiteConfig() {
   box-shadow: 0 0 0 1px var(--brand-primary) inset, 0 0 0 4px rgba(31, 99, 222, 0.14);
 }
 
-:deep(.has-append .el-input__wrapper) {
-  border-radius: 8px 0 0 8px;
-}
+.email-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 40px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--el-bg-color);
 
-:deep(.el-input-group__append) {
-  padding: 0;
-  border-radius: 0 8px 8px 0;
-  background: var(--el-fill-color-light);
-}
+  &.with-domain {
+    grid-template-columns: minmax(0, 1fr) min(48%, var(--domain-select-width));
+    @media (max-width: 360px) {
+      grid-template-columns: minmax(0, 1fr) min(60%, var(--domain-select-width));
+    }
+  }
 
-:deep(.domain-select .el-select__wrapper) {
-  min-height: 38px;
-  padding: 0 10px 0 12px;
-  background: transparent;
-  box-shadow: none !important;
+  &:focus-within {
+    border-color: var(--brand-primary);
+  }
+
+  :deep(.el-input),
+  .domain-select {
+    min-width: 0;
+    width: 100%;
+  }
+
+  :deep(.el-input__wrapper),
+  :deep(.el-select__wrapper) {
+    min-height: 40px;
+    border-radius: 0;
+    box-shadow: none !important;
+  }
+
+  .domain-select {
+    border-left: 1px solid var(--el-border-color);
+    background: var(--el-fill-color-light);
+  }
+
+  :deep(.el-select__wrapper) {
+    padding: 0 10px 0 12px;
+    background: transparent;
+  }
+
+  :deep(.el-select__selection) {
+    min-width: 0;
+  }
 }
 
 .caps-tip {

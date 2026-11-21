@@ -1,6 +1,10 @@
+import DOMPurify from 'dompurify';
+
 export function isSafeEmailUrl(value, kind = 'link') {
     try {
-        const url = new URL(value.trim());
+        const input = value.trim();
+        const localImage = kind === 'image' && /^\/(?:proxy\?|attachments\/|oss\/)/.test(input);
+        const url = localImage ? new URL(input, 'https://mail.invalid/') : new URL(input);
         if (['http:', 'https:'].includes(url.protocol)) return true;
         if (kind === 'link') return url.protocol === 'mailto:';
         return /^data:image\/(?:png|jpeg|gif|webp|bmp);/i.test(value.trim());
@@ -10,7 +14,9 @@ export function isSafeEmailUrl(value, kind = 'link') {
 }
 
 export function parseEmailHtml(html = '') {
-    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const clean = DOMPurify.sanitize(html, { WHOLE_DOCUMENT: true, ADD_TAGS: ['style'],
+        FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'base', 'meta', 'link', 'form', 'svg', 'math'] });
+    const doc = new DOMParser().parseFromString(clean, 'text/html');
     doc.querySelectorAll('script, iframe, object, embed, base, meta, link, form, input, button, textarea, select, svg, math').forEach(node => node.remove());
     doc.querySelectorAll('*').forEach(node => {
         for (const attribute of [...node.attributes]) {
@@ -37,11 +43,15 @@ export function parseEmailHtml(html = '') {
     return doc;
 }
 
+export function sanitizeEmailHtml(html = '') {
+    return parseEmailHtml(html).documentElement.outerHTML;
+}
+
 export function emailFrameDocument(html) {
     const doc = parseEmailHtml(html);
     const csp = doc.createElement('meta');
     csp.httpEquiv = 'Content-Security-Policy';
-    csp.content = "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src https: http: data:; base-uri 'none'; form-action 'none'";
+    csp.content = "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; img-src 'self' https: http: data:; base-uri 'none'; form-action 'none'";
     doc.head.prepend(csp);
     const style = doc.createElement('style');
     style.textContent = `

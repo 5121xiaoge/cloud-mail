@@ -26,3 +26,13 @@ test('escapes plain text before inserting it into a reply or forward', () => {
     assert.equal(escapeHtml(), '');
     assert.equal(escapeHtml(null), '');
 });
+
+test('allows same-origin image proxy and attachment paths only for images', () => {
+    for (const value of ['/proxy?url=https%3A%2F%2Fexample.test%2Fa.png&exp=1&sig=test', '/attachments/logo.png', '/oss/logo.png']) {
+        assert.equal(isSafeEmailUrl(value, 'image'), true, value);
+        assert.equal(isSafeEmailUrl(value), false, value);
+    }
+    for (const value of ['//foreign.example.test/proxy?url=test', '/private/logo.png', '/proxy-other?url=test']) {
+        assert.equal(isSafeEmailUrl(value, 'image'), false, value);
+    }
+});

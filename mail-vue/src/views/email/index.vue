@@ -29,7 +29,7 @@ import emailScroll from "@/components/email-scroll/index.vue"
 import {emailList, emailDelete, emailLatest, emailRead} from "@/request/email.js";
 import {starAdd, starCancel} from "@/request/star.js";
 import {defineOptions, onMounted, onUnmounted, reactive, ref, watch} from "vue";
-import {sleep} from "@/utils/time-utils.js";
+import {inboxWs, isAutoRefreshEnabled} from "@/websocket/client.js";
 import router from "@/router/index.js";
 import {Icon} from "@iconify/vue";
 import { useRoute } from 'vue-router'
@@ -49,13 +49,21 @@ const params = reactive({
 
 onMounted(() => {
   emailStore.emailScroll = scroll;
-  latest()
+  inboxWs.start({
+    isEnabled: () => route.name === 'email' && isAutoRefreshEnabled(settingStore.settings.autoRefresh),
+    onMessage: event => {
+      if (accountStore.currentAccount.allReceive || Number(event.accountId) === Number(accountStore.currentAccountId)) scheduleLatest()
+    },
+    onReconnect: scheduleLatest,
+  })
 })
 
 
 watch(() => accountStore.currentAccountId, () => {
   scroll.value.refreshList();
 })
+watch(() => [route.name, settingStore.settings.autoRefresh], () => inboxWs.sync())
+watch(() => emailStore.searchParams, () => scroll.value.refreshList(), { deep: true })
 
 function changeTimeSort() {
   params.timeSort = params.timeSort ? 0 : 1
@@ -72,57 +80,50 @@ function jumpContent(email) {
 }
 
 let disposed = false
-onUnmounted(() => { disposed = true })
+let pullTimer
+let pulling = false
+let pullAgain = false
+onUnmounted(() => { disposed = true; window.clearTimeout(pullTimer); inboxWs.stop() })
 
-async function latest() {
-  while (!disposed) {
+function scheduleLatest() {
+  window.clearTimeout(pullTimer)
+  pullTimer = window.setTimeout(pullLatest, 150)
+}
 
-    let autoRefresh = settingStore.settings.autoRefresh;
-    await sleep(autoRefresh > 1 ? autoRefresh * 1000 : 3000);
-    if (disposed) break;
-
-    if (route.name !== 'email') {
-      continue;
-    }
-
-    const latestId = scroll.value.latestEmail?.emailId
-    const deliveryId = scroll.value.latestEmail?.deliveryId
-
-    if (!scroll.value.firstLoad && autoRefresh > 1) {
-      try {
-        const accountId = accountStore.currentAccountId
-        const allReceive = scroll.value.latestEmail?.allReceive
-        const curTimeSort = params.timeSort
-        let list = []
-
-        //确保发起请求时最后一个邮件是当前账号的,或者
-        if (accountId === scroll.value.latestEmail?.reqAccountId) {
-          list = await emailLatest(latestId, accountId, allReceive, deliveryId);
-        }
-
-        //确保请求回来后，账号没有切换，时间排序没有改变，全部邮件类型没变
-        if (!disposed && accountId === accountStore.currentAccountId && params.timeSort === curTimeSort && allReceive === accountStore.currentAccount.allReceive) {
-          if (list.length > 0) {
-
-            for (let email of list) {
-
-              email.reqAccountId = accountId;
-              email.allReceive = allReceive;
-
-              scroll.value.addItem(email)
-
-            }
-
-          }
-
-        }
-      } catch (e) {
-        if (e.code === 401 || e.code === 403) {
-          settingStore.settings.autoRefresh = 0;
-        }
-        console.error(e)
+async function pullLatest() {
+  if (pulling) { pullAgain = true; return }
+  if (disposed || route.name !== 'email' || scroll.value.firstLoad) return
+  const search = emailStore.searchParams
+  if (search.text || search.startDate || search.endDate) {
+    scroll.value.refreshList()
+    return
+  }
+  const accountId = accountStore.currentAccountId
+  const allReceive = accountStore.currentAccount.allReceive
+  const timeSort = params.timeSort
+  if (accountId !== scroll.value.latestEmail?.reqAccountId) return
+  pulling = true
+  try {
+    let list
+    do {
+      const cursor = scroll.value.latestEmail
+      list = await emailLatest(cursor?.emailId || 0, accountId, allReceive, cursor?.deliveryId)
+      if (disposed || route.name !== 'email' || accountId !== accountStore.currentAccountId ||
+          timeSort !== params.timeSort || allReceive !== accountStore.currentAccount.allReceive) return
+      for (const email of list) {
+        email.reqAccountId = accountId
+        email.allReceive = allReceive
+        scroll.value.addItem(email)
       }
+    } while (list.length >= 20)
+  } catch (error) {
+    if (error.code === 401 || error.code === 403) {
+      settingStore.settings.autoRefresh = 1
+      inboxWs.sync()
     }
+  } finally {
+    pulling = false
+    if (pullAgain) { pullAgain = false; scheduleLatest() }
   }
 }
 
@@ -137,7 +138,7 @@ function cancelStar(email) {
 function getEmailList(emailId, size, signal) {
   const accountId =  accountStore.currentAccountId;
   const allReceive = accountStore.currentAccount.allReceive;
-  return emailList(accountId, allReceive, emailId, params.timeSort, size, 0, signal).then(data => {
+  return emailList(accountId, allReceive, emailId, params.timeSort, size, 0, signal, 1, emailStore.searchParams).then(data => {
     if (data.latestEmail) {
       data.latestEmail.reqAccountId = accountId;
       data.latestEmail.allReceive = allReceive;

@@ -18,37 +18,101 @@
         </button>
       </div>
       <div class="container">
-        <el-input-tag :aria-label="$t('recipient')" @add-tag="addTagChange" tag-type="primary" @input="inputChange" size="default" v-model="form.receiveEmail" >
-          <template #prefix>
-            <div class="item-title" >{{ $t('recipient') }}</div>
-            <el-select
-                ref="mySelect"
-                class="write-select"
-                popper-class="write-select"
-                :show-arrow="false"
-                :no-match-text="' '"
-                :no-data-text="' '"
-                @visible-change="selectStatusChange"
-                @change="selectChange"
-            >
-              <el-option
-                  v-for="item in selectRecipientList"
-                  :key="item"
-                  :label="item"
-                  :value="item"
-                  style="color: #999896;"
-              />
-            </el-select>
-          </template>
-          <template #suffix>
-            <div style="display: flex;margin-right: 3px;">
-              <button type="button" class="icon-button add-contact" :aria-label="$t('recentContacts')" :title="$t('recentContacts')" @click.stop="openContacts">
-                <Icon icon="fa7-solid:user-plus" width="20"/>
-              </button>
-            </div>
-          </template>
-        </el-input-tag>
-        <el-input v-model="form.subject" :placeholder="t('subject')" :aria-label="$t('subject')" />
+        <div class="address-fields">
+          <el-input-tag  @add-tag="addTagChange" tag-type="primary" @input="value => updateSuggest('receive', value)" size="large" v-model="form.receiveEmail" >
+            <template #prefix>
+              <div class="item-title" >{{ $t('recipient') }}</div>
+              <el-select
+                  ref="mySelect"
+                  class="write-select"
+                  popper-class="write-select"
+                  :show-arrow="false"
+                  :no-match-text="' '"
+                  :no-data-text="' '"
+                  @visible-change="status => suggestStatusChange('receive', status)"
+                  @change="value => suggestChange('receive', value)"
+              >
+                <el-option
+                    v-for="item in selectRecipientList"
+                    :key="item"
+                    :label="item"
+                    :value="item"
+                    style="color: #999896;"
+                />
+              </el-select>
+            </template>
+            <template #suffix>
+              <div class="address-actions">
+                <button type="button" class="address-toggle" :aria-label="$t('cc')" :title="$t('cc')" v-if="form.manyType !== 'divide' && !showCc" @click.stop="openCc">CC</button>
+                <button type="button" class="address-toggle" :aria-label="$t('bcc')" :title="$t('bcc')" v-if="form.manyType !== 'divide' && !showBcc" @click.stop="openBcc">BCC</button>
+                <button type="button" class="icon-button add-contact" :aria-label="$t('recentContacts')" :title="$t('recentContacts')" @click.stop="openContacts('receive')">
+                  <Icon icon="fa7-solid:user-plus" width="20" height="20"/>
+                </button>
+              </div>
+            </template>
+          </el-input-tag>
+          <el-input-tag v-if="form.manyType !== 'divide' && showCc" ref="ccInputRef" tag-type="primary" size="large" v-model="form.ccEmail" @input="value => updateSuggest('cc', value)" @add-tag="addCcTag">
+            <template #prefix>
+              <div class="item-title">{{ $t('cc') }}</div>
+              <el-select
+                  ref="ccSelectRef"
+                  class="write-select"
+                  popper-class="write-select"
+                  :show-arrow="false"
+                  :no-match-text="' '"
+                  :no-data-text="' '"
+                  @visible-change="status => suggestStatusChange('cc', status)"
+                  @change="value => suggestChange('cc', value)"
+              >
+                <el-option
+                    v-for="item in ccSuggestList"
+                    :key="item"
+                    :label="item"
+                    :value="item"
+                    style="color: #999896;"
+                />
+              </el-select>
+            </template>
+            <template #suffix>
+              <div class="address-actions">
+                <button type="button" class="icon-button add-contact" :aria-label="$t('recentContacts')" :title="$t('recentContacts')" @click.stop="openContacts('cc')">
+                  <Icon icon="fa7-solid:user-plus" width="20" height="20"/>
+                </button>
+              </div>
+            </template>
+          </el-input-tag>
+          <el-input-tag v-if="form.manyType !== 'divide' && showBcc" ref="bccInputRef" tag-type="primary" size="large" v-model="form.bccEmail" @input="value => updateSuggest('bcc', value)" @add-tag="addBccTag">
+            <template #prefix>
+              <div class="item-title">{{ $t('bcc') }}</div>
+              <el-select
+                  ref="bccSelectRef"
+                  class="write-select"
+                  popper-class="write-select"
+                  :show-arrow="false"
+                  :no-match-text="' '"
+                  :no-data-text="' '"
+                  @visible-change="status => suggestStatusChange('bcc', status)"
+                  @change="value => suggestChange('bcc', value)"
+              >
+                <el-option
+                    v-for="item in bccSuggestList"
+                    :key="item"
+                    :label="item"
+                    :value="item"
+                    style="color: #999896;"
+                />
+              </el-select>
+            </template>
+            <template #suffix>
+              <div class="address-actions">
+                <button type="button" class="icon-button add-contact" :aria-label="$t('recentContacts')" :title="$t('recentContacts')" @click.stop="openContacts('bcc')">
+                  <Icon icon="fa7-solid:user-plus" width="20" height="20"/>
+                </button>
+              </div>
+            </template>
+          </el-input-tag>
+        </div>
+        <el-input v-model="form.subject" :placeholder="t('subject')" size="large"  @focus="hideEmptyCcBcc" style="padding-bottom: 4px" />
         <tinyEditor :def-value="defValue" ref="editor" @change="change" @focus="focusChange" />
         <div class="button-item">
           <button type="button" class="icon-button att-add" :aria-label="$t('attachments')" :title="$t('attachments')" @click="chooseFile">
@@ -68,15 +132,25 @@
             </div>
           </div>
           <div>
-            <el-button type="primary" @click="sendEmail" v-if="form.sendType === 'reply'">{{ $t('reply') }}</el-button>
-            <el-button type="primary" @click="sendEmail" v-else-if="form.sendType === 'forward'">{{ $t('forward') }}</el-button>
-            <el-button type="primary" @click="sendEmail" v-else>{{ $t('send') }}</el-button>
+            <el-dropdown split-button type="primary" trigger="click" @click="sendEmail" @command="selectSendMode">
+              {{ sendButtonLabel }}
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="together">
+                    {{ togetherSendLabel }}
+                  </el-dropdown-item>
+                  <el-dropdown-item command="divide">
+                    {{ separateSendLabel }}
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
           </div>
         </div>
       </div>
     </div>
     <el-dialog top="10vh" v-model="showContacts" @closed="clearSelectContact" :title="t('recentContacts')">
-      <el-table ref="contactsTabRef" row-key="email" :data="contacts" style="height: min(445px, 55dvh)">
+      <el-table class="contacts-table" ref="contactsTabRef" row-key="email" :data="contacts" style="height: min(445px, 55dvh)" @row-click="toggleContactRow">
         <el-table-column type="selection" width="32" />
         <el-table-column property="email" :label="t('emailAccount')" >
           <template #default="props">
@@ -147,8 +221,15 @@ let sending = false
 const defValue = ref('')
 const contactsTabRef = ref({})
 const showContacts = ref(false)
+const contactTarget = ref('receive')
+const showCc = ref(false)
+const showBcc = ref(false)
+const ccInputRef = ref()
+const bccInputRef = ref()
 const mySelect = ref()
-let selectStatus = false
+const ccSelectRef = ref()
+const bccSelectRef = ref()
+const suggestOpen = { receive: false, cc: false, bcc: false }
 const backReply = reactive({
   receiveEmail: [],
   subject: '',
@@ -158,11 +239,14 @@ const backReply = reactive({
 const form = reactive({
   sendEmail: '',
   receiveEmail: [],
+  ccEmail: [],
+  bccEmail: [],
   accountId: -1,
   name: '',
   subject: '',
   content: '',
   sendType: '',
+  manyType: 'together',
   text: '',
   emailId: 0,
   attachments: [],
@@ -170,13 +254,53 @@ const form = reactive({
 })
 
 const selectRecipientList = ref([])
+const ccSuggestList = ref([])
+const bccSuggestList = ref([])
+const suggestListMap = { receive: selectRecipientList, cc: ccSuggestList, bcc: bccSuggestList }
+const suggestSelectMap = { receive: mySelect, cc: ccSelectRef, bcc: bccSelectRef }
+const suggestFieldMap = { receive: 'receiveEmail', cc: 'ccEmail', bcc: 'bccEmail' }
 
 const contacts = computed(() => writerStore.sendRecipientRecord.map(item => ({email: item})))
+const togetherSendLabel = computed(() => {
+  if (form.sendType === 'reply') return t('reply')
+  if (form.sendType === 'forward') return t('forward')
+  return t('send')
+})
+const separateSendLabel = computed(() => {
+  if (form.sendType === 'reply') return t('separateReply')
+  if (form.sendType === 'forward') return t('separateForward')
+  return t('separateSend')
+})
+const sendButtonLabel = computed(() => {
+  if (form.manyType === 'divide') return separateSendLabel.value
+  return togetherSendLabel.value
+})
 
-function openContacts() {
+function clearCcBcc() {
+  form.ccEmail = []
+  form.bccEmail = []
+  showCc.value = false
+  showBcc.value = false
+}
+
+function selectSendMode(mode) {
+  form.manyType = mode
+  if (mode === 'divide') {
+    clearCcBcc()
+  }
+}
+
+function targetAddressKey() {
+  if (contactTarget.value === 'cc') return 'ccEmail'
+  if (contactTarget.value === 'bcc') return 'bccEmail'
+  return 'receiveEmail'
+}
+
+function openContacts(target = 'receive') {
+  contactTarget.value = target
   showContacts.value = true
   nextTick(() => {
-    form.receiveEmail.forEach(item => {
+    form[targetAddressKey()].forEach(item => {
       if (writerStore.sendRecipientRecord.includes(item)) {
         contactsTabRef.value.toggleRowSelection({email: item});
       }
@@ -191,7 +315,8 @@ function deleteContact() {
     type: 'warning'
   }).then(() => {
     const contactList = contactsTabRef.value.getSelectionRows().map(item => item.email);
-    form.receiveEmail = form.receiveEmail.filter(item => !contactList.includes(item));
+    const key = targetAddressKey()
+    form[key] = form[key].filter(item => !contactList.includes(item));
     writerStore.sendRecipientRecord = writerStore.sendRecipientRecord.filter(item => !contactList.includes(item));
   })
 }
@@ -199,13 +324,14 @@ function deleteContact() {
 function chooseContact() {
 
   const contactList = contactsTabRef.value.getSelectionRows().map(item => item.email);
+  const key = targetAddressKey()
   contactList.forEach(item => {
-    if (!form.receiveEmail.includes(item)) {
-      form.receiveEmail.push(item);
+    if (!form[key].includes(item)) {
+      form[key].push(item);
     }
   })
 
-  form.receiveEmail = form.receiveEmail.filter(item => {
+  form[key] = form[key].filter(item => {
     return contactList.includes(item) || !writerStore.sendRecipientRecord.includes(item);
   });
 
@@ -216,51 +342,93 @@ function clearSelectContact() {
   contactsTabRef.value.clearSelection();
 }
 
-function selectChange(value) {
-  form.receiveEmail.push(value)
+function toggleContactRow(row, column) {
+  if (column?.type === 'selection') return
+  contactsTabRef.value.toggleRowSelection(row)
 }
 
-function selectStatusChange(status) {
-  selectStatus = status
+function toggleSuggest(target) {
+  suggestSelectMap[target].value?.toggleMenu()
 }
 
-const openSelect = () => {
-  mySelect.value.toggleMenu()
+function suggestStatusChange(target, status) {
+  suggestOpen[target] = status
 }
 
-function inputChange(value) {
+function suggestChange(target, value) {
+  form[suggestFieldMap[target]].push(value)
+}
 
-  selectRecipientList.value = writerStore.sendRecipientRecord.filter(item => value && !form.receiveEmail.includes(item) && item.startsWith(value)).slice(0, 10);
+function updateSuggest(target, value) {
+  const field = suggestFieldMap[target]
+  const list = writerStore.sendRecipientRecord.filter(item => value && !form[field].includes(item) && item.startsWith(value)).slice(0, 10)
+  suggestListMap[target].value = list
 
-  if (!selectStatus && selectRecipientList.value.length > 0) {
-    openSelect()
+  if (!suggestOpen[target] && list.length > 0) {
+    toggleSuggest(target)
   }
 
-  if (selectStatus && selectRecipientList.value.length === 0) {
-    openSelect()
+  if (suggestOpen[target] && list.length === 0) {
+    toggleSuggest(target)
   }
-
 }
 
-function addTagChange(val) {
+function closeOpenSuggest() {
+  for (const target of ['receive', 'cc', 'bcc']) {
+    if (suggestOpen[target]) toggleSuggest(target)
+  }
+}
 
+function addAddressTag(list, val) {
   const emails = Array.from(new Set(
       val.split(/[,，]/).map(item => item.trim()).filter(item => item)
   ));
 
-  form.receiveEmail.splice(form.receiveEmail.length - 1, 1)
+  list.splice(list.length - 1, 1)
 
   let has = false
   emails.forEach(email => {
-    if (isEmail(email) && !form.receiveEmail.includes(email)) {
-      form.receiveEmail.push(email)
+    if (isEmail(email) && !list.includes(email)) {
+      list.push(email)
       has = true
     }
   })
-  if (selectStatus && has) openSelect()
+  return has
+}
+
+function addTagChange(val) {
+  if (addAddressTag(form.receiveEmail, val) && suggestOpen.receive) toggleSuggest('receive')
+}
+
+function addCcTag(val) {
+  if (addAddressTag(form.ccEmail, val) && suggestOpen.cc) toggleSuggest('cc')
+}
+
+function addBccTag(val) {
+  if (addAddressTag(form.bccEmail, val) && suggestOpen.bcc) toggleSuggest('bcc')
+}
+
+function openCc() {
+  showCc.value = true
+  nextTick(() => ccInputRef.value?.focus?.())
+}
+
+function openBcc() {
+  showBcc.value = true
+  nextTick(() => bccInputRef.value?.focus?.())
+}
+
+function hideEmptyCcBcc() {
+  if (showCc.value && form.ccEmail.length === 0) {
+    showCc.value = false
+  }
+  if (showBcc.value && form.bccEmail.length === 0) {
+    showBcc.value = false
+  }
 }
 
 function clearContent() {
+  hideEmptyCcBcc()
   ElMessageBox.confirm(t('clearContentConfirm'), {
     confirmButtonText: t('confirm'),
     cancelButtonText: t('cancel'),
@@ -276,6 +444,7 @@ function delAtt(index) {
 }
 
 function chooseFile() {
+  hideEmptyCcBcc()
   const doc = document.createElement("input")
   doc.setAttribute("type", "file")
   doc.multiple = true;
@@ -299,6 +468,7 @@ function chooseFile() {
 }
 
 async function sendEmail() {
+  hideEmptyCcBcc()
 
   if (form.receiveEmail.length === 0) {
     ElMessage({
@@ -331,15 +501,6 @@ async function sendEmail() {
     return
   }
 
-  if (form.manyType === 'divide' && form.attachments.length > 0) {
-    ElMessage({
-      message: t('noSeparateSendMsg'),
-      type: 'error',
-      plain: true,
-    })
-    return
-  }
-
   if (sending) {
     ElMessage({
       message: t('sendingErrorMsg'),
@@ -363,11 +524,27 @@ async function sendEmail() {
 
   emailSend(form, (e) => {
     percent.value = Math.round((e.loaded * 98) / e.total)
-  }).then(emailList => {
+  }).then(result => {
+    const emailList = Array.isArray(result) ? result : result.emails
     const email = emailList[0]
     emailList.forEach(item => {
       emailStore.sendScroll?.addItem(item)
     })
+
+    userStore.refreshUserInfo();
+    addRecipientRecord();
+
+    if (result.failedRecipients?.length) {
+      form.receiveEmail = result.failedRecipients
+      show.value = true
+      ElNotification({
+        title: t('partialSendMsg', {count: emailList.length, failed: result.failedRecipients.length}),
+        type: 'warning',
+        message: result.error,
+        position: 'bottom-right'
+      })
+      return
+    }
 
     ElNotification({
       title: t('sendSuccessMsg'),
@@ -375,10 +552,6 @@ async function sendEmail() {
       message: h('span', {style: 'color: teal'}, email.subject),
       position: 'bottom-right'
     })
-
-    userStore.refreshUserInfo();
-
-    addRecipientRecord();
 
     if (form.draftId) {
       form.subject = ''
@@ -410,19 +583,32 @@ async function sendEmail() {
 }
 
 function addRecipientRecord() {
+  const seen = new Set()
+  const addresses = []
+  for (const email of [...form.receiveEmail, ...form.ccEmail, ...form.bccEmail]) {
+    const key = String(email).trim().toLowerCase()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    addresses.push(email)
+  }
+
   writerStore.sendRecipientRecord = writerStore.sendRecipientRecord.filter(
-      email => !form.receiveEmail.includes(email)
+      email => !seen.has(String(email).trim().toLowerCase())
   );
 
-  writerStore.sendRecipientRecord.unshift(...form.receiveEmail);
+  writerStore.sendRecipientRecord.unshift(...addresses);
   writerStore.sendRecipientRecord = writerStore.sendRecipientRecord.slice(0, 500);
 }
 
 function resetForm() {
   form.receiveEmail = []
+  form.ccEmail = []
+  form.bccEmail = []
+  showCc.value = false
+  showBcc.value = false
   form.subject = ''
   form.content = ''
-  form.manyType = null
+  form.manyType = 'together'
   form.attachments = []
   form.sendType = ''
   form.emailId = 0
@@ -441,7 +627,8 @@ function change(content, text) {
 }
 
 function focusChange() {
-  if (selectStatus) openSelect()
+  closeOpenSuggest()
+  hideEmptyCcBcc()
 }
 
 function openForward(email) {
@@ -532,7 +719,14 @@ function open() {
 }
 
 function openDraft(draft) {
-  Object.assign(form, {...draft})
+  Object.assign(form, {...draft, manyType: draft.manyType || 'together'})
+  form.ccEmail = draft.ccEmail || []
+  form.bccEmail = draft.bccEmail || []
+  if (form.manyType === 'divide') {
+    clearCcBcc()
+  }
+  showCc.value = form.ccEmail.length > 0
+  showBcc.value = form.bccEmail.length > 0
   defValue.value = ''
   setTimeout(() => defValue.value = form.content)
   show.value = true;
@@ -542,7 +736,7 @@ function openDraft(draft) {
 function close() {
   if (!show.value || showContacts.value) return;
 
-  if (selectStatus) openSelect();
+  closeOpenSuggest();
 
   if (!form.content) {
     form.content = editor.value?.getContent() || defValue.value;
@@ -555,7 +749,7 @@ function close() {
     return;
   }
 
-  if (!(form.content || form.subject || form.receiveEmail.length > 0)) {
+  if (!(form.content || form.subject || form.receiveEmail.length > 0 || form.ccEmail.length > 0 || form.bccEmail.length > 0)) {
     show.value = false
     resetForm()
     return;
@@ -798,8 +992,45 @@ function close() {
   margin-top: 10px;
 }
 
+.contacts-table :deep(.el-table__row) {
+  cursor: pointer;
+}
+
 .add-contact {
-  color: var(--regular-text-color)
+  color: var(--regular-text-color);
+  width: 28px;
+  height: 28px;
+}
+
+.address-fields {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+
+  :deep(.el-input-tag) {
+    min-width: 0;
+  }
+}
+
+.address-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.address-toggle {
+  border: 0;
+  background: transparent;
+  color: var(--el-text-color-regular);
+  padding: 0 4px;
+  line-height: 28px;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--el-color-primary);
+  }
 }
 
 .write-select {
@@ -809,10 +1040,6 @@ function close() {
   z-index: 0;
   opacity: 0;
   pointer-events: none;
-}
-
-:deep(.el-input-tag__suffix) {
-  padding-right: 4px;
 }
 
 .icon {

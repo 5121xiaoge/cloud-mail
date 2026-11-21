@@ -17,6 +17,7 @@ import KvConst from '../const/kv-const';
 import paramUtils from '../utils/param-utils';
 import loginGuard from '../security/login-guard';
 import adminMode from '../security/admin-mode';
+import proxyService from './proxy-service';
 
 const publicService = {
 
@@ -83,7 +84,9 @@ const publicService = {
 			query.orderBy(desc(email.emailId));
 		}
 
-		return query.limit(size).offset(num);
+		const rows = await query.limit(size).offset(num);
+		// 公开邮件列表也把外链图改成 /proxy?url=。
+		return proxyService.rewriteList(c, rows);
 
 	},
 

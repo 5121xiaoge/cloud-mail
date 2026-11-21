@@ -255,16 +255,17 @@ test('the inbox queries the displayed mailbox and tags its polling cursor with t
     const accountStore = { currentAccountId: 2, currentAccount: secondary };
     const calls = [];
     const response = { list: [], latestEmail: { emailId: 8 } };
-    const getList = new Function('accountStore', 'params', 'emailList',
+    const searchParams = { text: '', type: 'subject' };
+    const getList = new Function('accountStore', 'params', 'emailList', 'emailStore',
         source.slice(node.start, node.end) + '\nreturn getEmailList;')(
         accountStore, { timeSort: 0 }, async (...args) => {
             calls.push(args);
             return response;
-        },
+        }, { searchParams },
     );
     const signal = new AbortController().signal;
     const result = await getList(0, 50, signal);
-    assert.deepEqual(calls[0], [2, 0, 0, 0, 50, 0, signal]);
+    assert.deepEqual(calls[0], [2, 0, 0, 0, 50, 0, signal, 1, searchParams]);
     assert.equal(result.latestEmail.reqAccountId, 2);
     assert.equal(result.latestEmail.allReceive, 0);
     accountStore.currentAccountId = 1;

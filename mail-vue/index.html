@@ -12,13 +12,12 @@
   <script>
     try {
     const uiStoreStr =  localStorage.getItem('ui')
+    let isDark = false
     if (uiStoreStr) {
       const uiStore =  JSON.parse(uiStoreStr)
+      isDark = uiStore.dark
       const root = document.documentElement
-      root.setAttribute('class', uiStore.dark ? 'dark' : '');
-      const metaTag = document.getElementById('theme-color-meta');
-      const isMobile =  !window.matchMedia("(pointer: fine) and (hover: hover)").matches;
-      metaTag.setAttribute('content', uiStore.dark ? (isMobile ? '#141414' : '#000000') : (isMobile ? '#FFFFFF' : '#F1F1F1'));
+      root.setAttribute('class', isDark ? 'dark' : '');
     }
     } catch {
       // Corrupt optional preferences must not prevent application startup.

@@ -1,7 +1,7 @@
 import KvConst from '../const/kv-const';
 import setting from '../entity/setting';
 import orm from '../entity/orm';
-import {verifyRecordType} from '../const/entity-const';
+import {settingConst, verifyRecordType} from '../const/entity-const';
 import fileUtils from '../utils/file-utils';
 import r2Service from './r2-service';
 import constant from '../const/constant';
@@ -10,7 +10,7 @@ import {t} from '../i18n/i18n'
 import verifyRecordService from './verify-record-service';
 import userContext from '../security/user-context';
 import adminMode from '../security/admin-mode';
-import { settingConst } from '../const/entity-const';
+import domainUtils from '../utils/domain-uitls';
 
 // 允许通过 /setting/set 修改的字段（与 setting 表一致），其余字段一律忽略
 const SETTABLE_FIELDS = Object.keys(setting).filter(key => key !== 'background' && setting[key] && typeof setting[key] === 'object' && 'columnType' in setting[key]);
@@ -23,6 +23,7 @@ const settingService = {
 	async refresh(c) {
 		const settingRow = await orm(c).select().from(setting).get();
 		settingRow.resendTokens = JSON.parse(settingRow.resendTokens);
+		settingRow.r2Domain = '';
 		c.set('setting', settingRow);
 		await c.env.kv.put(KvConst.SETTING, JSON.stringify(settingRow));
 	},
@@ -56,18 +57,7 @@ const settingService = {
 		domainList = domainList.map(item => '@' + item);
 		setting.domainList = domainList;
 
-
-		let linuxdoSwitch = c.env.linuxdo_switch;
 		let projectLink = c.env.project_link;
-
-		if (typeof linuxdoSwitch === 'string' && linuxdoSwitch === 'true') {
-			linuxdoSwitch = true
-		} else if (linuxdoSwitch === true) {
-			linuxdoSwitch = true
-		} else {
-			linuxdoSwitch = false
-		}
-
 		if (typeof projectLink === 'string' && projectLink === 'false') {
 			projectLink = false
 		} else if (projectLink === false) {
@@ -79,34 +69,36 @@ const settingService = {
 		setting.projectLink = projectLink;
 
 		setting.adminOnly = adminMode.isAdminOnly(c);
+		let linuxdoSwitch = c.env.linuxdo_switch === true || c.env.linuxdo_switch === 'true';
 
 		if (setting.adminOnly) {
 			// 超级管理员单用户模式：强制关闭注册与第三方登录
 			setting.register = settingConst.register.CLOSE;
 			linuxdoSwitch = false;
+			setting.loginVerify = settingConst.loginVerify.CLOSE;
+			setting.githubSwitch = 1;
+			setting.googleSwitch = 1;
 		}
+		setting.loginVerify ??= settingConst.loginVerify.CLOSE;
+		setting.loginVerifyCount ??= 1;
 
 		setting.linuxdoClientId = linuxdoSwitch ? c.env.linuxdo_client_id : '';
 		setting.linuxdoCallbackUrl = linuxdoSwitch ? c.env.linuxdo_callback_url : '';
 		setting.linuxdoSwitch = linuxdoSwitch;
 
 		setting.emailPrefixFilter = setting.emailPrefixFilter.split(",").filter(Boolean);
+		setting.autoRefresh = [0, 1].includes(Number(setting.autoRefresh)) ? 1 : 2; // 兼容旧的 0 关闭
 
 		c.set?.('setting', setting);
 		return setting;
 	},
 
-	async get(c, showSiteKey = false) {
+	async get(c) {
 
 		const [settingRow, recordList] = await Promise.all([
 			await this.query(c),
 			verifyRecordService.selectListByIP(c)
 		]);
-
-
-		if (!showSiteKey) {
-			settingRow.siteKey = settingRow.siteKey ? `${settingRow.siteKey.slice(0, 6)}******` : null;
-		}
 
 		settingRow.secretKey = settingRow.secretKey ? `${settingRow.secretKey.slice(0, 6)}******` : null;
 
@@ -116,11 +108,13 @@ const settingService = {
 
 		settingRow.s3AccessKey = settingRow.s3AccessKey ? `${settingRow.s3AccessKey.slice(0, 12)}******` : null;
 		settingRow.s3SecretKey = settingRow.s3SecretKey ? `${settingRow.s3SecretKey.slice(0, 12)}******` : null;
+		settingRow.tgBotToken = settingRow.tgBotToken ? `${settingRow.tgBotToken.slice(0, 20)}******` : null;
 		settingRow.hasR2 = !!c.env.r2
 		settingRow.hasCfEmail = !!c.env.email
 
 		let regVerifyOpen = false
 		let addVerifyOpen = false
+		let loginVerifyOpen = false
 
 		recordList.forEach(row => {
 			if (row.type === verifyRecordType.REG) {
@@ -129,10 +123,14 @@ const settingService = {
 			if (row.type === verifyRecordType.ADD) {
 				addVerifyOpen = row.count >= settingRow.addVerifyCount
 			}
+			if (row.type === verifyRecordType.LOGIN) {
+				loginVerifyOpen = row.count >= settingRow.loginVerifyCount
+			}
 		})
 
 		settingRow.regVerifyOpen = regVerifyOpen
 		settingRow.addVerifyOpen = addVerifyOpen
+		settingRow.loginVerifyOpen = loginVerifyOpen
 
 		settingRow.storageType = await r2Service.storageType(c);
 
@@ -149,6 +147,10 @@ const settingService = {
 		}
 		if (settingData.adminOnly) {
 			params.register = settingConst.register.CLOSE;
+			params.loginVerify = settingConst.loginVerify.CLOSE;
+			params.linuxdoSwitch = 1;
+			params.githubSwitch = 1;
+			params.googleSwitch = 1;
 		}
 		let resendTokens = { ...settingData.resendTokens, ...(input?.resendTokens || {}) };
 		Object.keys(resendTokens).forEach(domain => {
@@ -163,12 +165,24 @@ const settingService = {
 			params.aiCodeFilter = params.aiCodeFilter + '';
 		}
 
+		if (params.webhookUrl !== undefined) {
+			params.webhookUrl = domainUtils.toOssDomain(params.webhookUrl) || '';
+		}
 		if (params.loginDarkenFactor !== undefined) {
 			const factor = Number(params.loginDarkenFactor);
 			params.loginDarkenFactor = Number.isNaN(factor) ? 0 : Math.min(1, Math.max(0, factor));
 		}
 
 		params.resendTokens = JSON.stringify(resendTokens);
+
+		if (params.autoRefresh !== undefined) {
+			params.autoRefresh = Number(params.autoRefresh) === 1 ? 1 : 2;
+		}
+
+		if (params.loginVerifyCount !== undefined && (!Number.isSafeInteger(params.loginVerifyCount) || params.loginVerifyCount < 1)) {
+			params.loginVerifyCount = 1;
+		}
+
 		await orm(c).update(setting).set({ ...params }).returning().get();
 		await this.refresh(c);
 	},
@@ -282,6 +296,7 @@ const settingService = {
 			autoRefresh: settingRow.autoRefresh,
 			addEmailVerify: settingRow.addEmailVerify,
 			registerVerify: settingRow.registerVerify,
+			loginVerify: settingRow.loginVerify,
 			send: settingRow.send,
 			r2Domain: settingRow.r2Domain,
 			siteKey: settingRow.siteKey,
@@ -302,8 +317,11 @@ const settingService = {
 			notice: settingRow.notice,
 			loginDomain: settingRow.loginDomain,
 			linuxdoClientId: settingRow.linuxdoClientId,
-			linuxdoCallbackUrl: settingRow.linuxdoCallbackUrl,
 			linuxdoSwitch: settingRow.linuxdoSwitch,
+			githubClientId: settingRow.githubClientId,
+			githubSwitch: settingRow.githubSwitch,
+			googleClientId: settingRow.googleClientId,
+			googleSwitch: settingRow.googleSwitch,
 			minEmailPrefix: settingRow.minEmailPrefix,
 			projectLink: settingRow.projectLink,
 			adminOnly: settingRow.adminOnly

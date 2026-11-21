@@ -1,11 +1,16 @@
 import { readFileSync } from 'node:fs';
 import { babelParse } from 'vue/compiler-sfc';
+import fileUtils from '../../mail-worker/src/utils/file-utils.js';
+import emailUtils from '../../mail-worker/src/utils/email-utils.js';
+import { isDangerousAttType } from '../../mail-worker/src/utils/att-headers.js';
+import { notifyMailWsFromContext } from '../../mail-worker/src/websocket/notify.js';
 
 export const { DatabaseSync } = await import('node:sqlite').catch(() => ({}));
 export const readWorker = path => readFileSync(new URL(`../../mail-worker/src/${path}`, import.meta.url), 'utf8');
 const program = source => babelParse(source, { sourceType: 'module' }).program.body;
 
 export function workerObject(path, name, dependencies = {}) {
+    dependencies = { fileUtils, isDangerousAttType, ...dependencies };
     const source = readWorker(path);
     const object = program(source).find(node => node.type === 'VariableDeclaration' &&
         node.declarations[0].id.name === name).declarations[0].init;
@@ -49,9 +54,10 @@ const compare = operator => (a, b) => {
     a = scalar(a); b = scalar(b);
     return { sql: `${a.sql} ${operator} ${b.sql}`, params: [...a.params, ...b.params] };
 };
-const combine = operator => (...items) => ({
-    sql: `(${items.map(item => item.sql).join(` ${operator} `)})`, params: items.flatMap(item => item.params),
-});
+const combine = operator => (...items) => {
+    items = items.filter(Boolean);
+    return { sql: `(${items.map(item => item.sql).join(` ${operator} `)})`, params: items.flatMap(item => item.params) };
+};
 export const expressions = {
     eq: compare('='), gt: compare('>'), lt: compare('<'), and: combine('AND'), or: combine('OR'),
     asc: column => `${column.sql} ASC`, desc: column => `${column.sql} DESC`,
@@ -116,13 +122,14 @@ export function database(t) {
             const query = {
                 from(model) { from = model; fields ??= model; return query; },
                 leftJoin(model, on) { joins.push([model, on]); return query; },
+                innerJoin(model, on) { joins.push([model, on, 'INNER']); return query; },
                 where(value) { condition = value; return query; },
                 orderBy(...values) { order = values; return query; },
                 limit(value) { limit = value; return query; },
                 async all() {
                     let sql = `SELECT ${projection(fields)} FROM ${from.tableName}`;
                     const params = [];
-                    for (const [model, on] of joins) { sql += ` LEFT JOIN ${model.tableName} ON ${on.sql}`; params.push(...on.params); }
+                    for (const [model, on, type = 'LEFT'] of joins) { sql += ` ${type} JOIN ${model.tableName} ON ${on.sql}`; params.push(...on.params); }
                     if (condition) { sql += ` WHERE ${condition.sql}`; params.push(...condition.params); }
                     if (order.length) sql += ` ORDER BY ${order.join(',')}`;
                     if (limit !== undefined) { sql += ' LIMIT ?'; params.push(limit); }
@@ -168,13 +175,14 @@ export function database(t) {
     const services = {
         orm, email, account, star, att, emailDelivery, emailDeliveryService: delivery,
         ...constants, ...expressions,
+        emailListColumns: email, emailBriefColumns: email, EMAIL_LIST_TEXT_LEN: 256,
+        emailUtils, notifyMailWsFromContext,
         accountService: { selectById: async () => ({ allReceive: 0 }) },
         settingService: { query: async () => ({ noRecipient: 1 }) },
         roleService: {
             selectByUserIds: async () => [{ userId: 10, banEmail: '', availDomain: '' }],
             hasAvailDomainPerm: () => true, isBanEmail: () => false,
         },
-        emailUtils: { getName: value => value.split('@')[0] },
     };
     const emailService = workerObject('service/email-service.js', 'emailService', services);
     emailService.emailAddAtt = async () => {};

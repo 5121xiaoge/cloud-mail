@@ -10,6 +10,8 @@ import { v4 as uuidv4 } from 'uuid';
 import domainUtils from '../utils/domain-uitls';
 import settingService from "./setting-service";
 import { sleep } from '../utils/time-utils';
+import proxyService from './proxy-service';
+import { isDangerousAttType } from '../utils/att-headers';
 
 const attService = {
 
@@ -18,7 +20,9 @@ const attService = {
 		for (let attachment of attachments) {
 
 			let metadate = {
-				contentType: attachment.mimeType,
+				contentType: isDangerousAttType(attachment.mimeType)
+					? 'application/octet-stream'
+					: attachment.mimeType,
 			}
 
 			// 仅安全图片允许内联展示，其余（HTML/SVG/脚本等）一律作为附件下载
@@ -91,20 +95,30 @@ const attService = {
 				imageDataList.push(attData);
 			}
 
+			// TinyMCE 可能把路径收成 ../attachments 或 /attachments
+			const proxyUrl = proxyService.fromProxyPath(src);
+			if (proxyUrl) {
+				img.setAttribute('src', proxyUrl);
+			}
+
+			const attKey = this.fromAttSrc(src);
+			const ossDomain = domainUtils.toOssDomain(r2Domain);
+			const fromOss = ossDomain && src && src.startsWith(ossDomain);
+
 			//邮件正文站内图片转cid附件
-			if (src && (src.startsWith(domainUtils.toOssDomain(r2Domain)) || src.startsWith('attachments/'))) {
+			if (fromOss || attKey) {
 
 				const cid = uuidv4().replace(/-/g, '')
 				img.setAttribute('src', 'cid:' + cid);
 
 				const attData = {};
 
-				if (src.startsWith(domainUtils.toOssDomain(r2Domain))) {
-					attData.key = src.replace(domainUtils.toOssDomain(r2Domain) + '/','');
+				if (fromOss) {
+					attData.key = src.replace(ossDomain + '/','');
 				}
 
-				if (src.startsWith('attachments/')) {
-					attData.key = src;
+				if (attKey) {
+					attData.key = attKey;
 				}
 
 				attData.contentId = cid;
@@ -251,7 +265,11 @@ const attService = {
 		const delKeyList = attListResult.flatMap(r => r.results ? r.results.map(row => row.key) : []);
 
 		if (delKeyList.length > 0) {
-			await this.batchDelete(c, delKeyList);
+			try {
+				await this.batchDelete(c, delKeyList);
+			} catch (e) {
+				console.error('删除附件文件失败：', e);
+			}
 		}
 
 	},
@@ -277,6 +295,19 @@ const attService = {
 			return []
 		}
 		return orm(c).select().from(att).where(inArray(att.key, keys)).orderBy(desc(att.attId)).groupBy(att.key).all();
+	},
+
+	// attachments/、/attachments/、../attachments/ 都收成存储 key。
+	fromAttSrc(src) {
+		if (!src) {
+			return null;
+		}
+		const marker = 'attachments/';
+		const idx = String(src).indexOf(marker);
+		if (idx === -1) {
+			return null;
+		}
+		return String(src).slice(idx);
 	}
 };
 

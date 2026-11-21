@@ -57,12 +57,7 @@ export function fromNow(date) {
 }
 
 export function updateNow(date) {
-    if (isToday) {
-        if (diffSeconds < 60) return `Just now`;
-        if (diffMinutes < 60) return `${diffMinutes} min ago`;
-        if (diffHours < 2) return `${diffHours} hour${diffHours > 1 ? 's' : ''} ago`;
-        return d.format('hh:mm A');
-    }
+    return fromNow(date);
 }
 
 export function formatDetailDate(time) {

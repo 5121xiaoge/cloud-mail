@@ -138,15 +138,35 @@ const loginService = {
 
 		const { salt, hash } = await saltHashUtils.hashPassword(password, c);
 
-		const userId = await userService.insert(c, { email, regKeyId,password: hash, salt, type: type || defType });
+		let consumedCode = null
+		const usingRegKey = regKey !== settingConst.regKey.CLOSE && type
 
-		await accountService.insert(c, { userId: userId, email, name: emailUtils.getName(email) });
+		if (usingRegKey && !await regKeyService.consumeCount(c, code)) {
+			if (regKey === settingConst.regKey.OPEN) {
+				throw new BizError(t('noRegKeyCount'))
+			}
+			type = null
+			regKeyId = 0
+			defType = await this.useDefaultRole(c, email)
+		}
+
+		if (usingRegKey && type) {
+			consumedCode = code
+		}
+
+		let userId
+
+		try {
+			userId = await userService.insert(c, { email, regKeyId, password: hash, salt, type: type || defType });
+			await accountService.insert(c, { userId: userId, email, name: emailUtils.getName(email) });
+		} catch (error) {
+			if (consumedCode) {
+				await regKeyService.restoreCount(c, consumedCode)
+			}
+			throw error
+		}
 
 		await userService.updateUserInfo(c, userId, true);
-
-		if (regKey !== settingConst.regKey.CLOSE && type) {
-			await regKeyService.reduceCount(c, code, 1);
-		}
 
 		if (registerVerify === settingConst.registerVerify.COUNT && !regVerifyOpen) {
 			const row = await verifyRecordService.increaseRegCount(c);
@@ -177,14 +197,19 @@ const loginService = {
 			throw new BizError(t('noRegKeyCount'));
 		}
 
-		const today = toUtc().tz('Asia/Shanghai').startOf('day')
-		const expireTime = toUtc(regKeyRow.expireTime).tz('Asia/Shanghai').startOf('day');
-
-		if (expireTime.isBefore(today)) {
+		if (!toUtc(regKeyRow.expireTime).isAfter(toUtc())) {
 			throw new BizError(t('regKeyExpire'));
 		}
 
 		return { type: regKeyRow.roleId, regKeyId: regKeyRow.regKeyId };
+	},
+
+	async useDefaultRole(c, email) {
+		const defaultRole = await roleService.selectDefaultRole(c)
+		if (!roleService.hasAvailDomainPerm(defaultRole.availDomain, email)) {
+			throw new BizError(t('noDomainPermReg'), 403)
+		}
+		return defaultRole.roleId
 	},
 
 	async handleOpenOptional(c, regKey, code) {
@@ -199,10 +224,7 @@ const loginService = {
 			return null
 		}
 
-		const today = toUtc().tz('Asia/Shanghai').startOf('day')
-		const expireTime = toUtc(regKeyRow.expireTime).tz('Asia/Shanghai').startOf('day');
-
-		if (regKeyRow.count <= 0 || expireTime.isBefore(today)) {
+		if (regKeyRow.count <= 0 || !toUtc(regKeyRow.expireTime).isAfter(toUtc())) {
 			return null
 		}
 
@@ -211,7 +233,7 @@ const loginService = {
 
 	async login(c, params, noVerifyPwd = false) {
 
-		const { email, password } = params || {};
+		const { email, password, token } = params || {};
 
 		if (typeof email !== 'string' || !email.trim()) {
 			throw new BizError(t('emailAndPwdEmpty'));
@@ -226,6 +248,13 @@ const loginService = {
 		}
 
 		const guardState = noVerifyPwd ? null : await loginGuard.check(c, email);
+		if (!noVerifyPwd && !adminMode.isAdminOnly(c)) {
+			const { loginVerify, loginVerifyCount = 1 } = await settingService.query(c);
+			if (loginVerify === settingConst.loginVerify.OPEN ||
+				(loginVerify === settingConst.loginVerify.COUNT && !await verifyRecordService.consumeLoginAttempt(c, loginVerifyCount))) {
+				await turnstileService.verify(c, token);
+			}
+		}
 
 		// 超级管理员单用户模式：非管理员账号按“账号不存在”处理，提示与耗时一致，避免枚举
 		const allowed = !adminMode.isAdminOnly(c) || adminMode.isAdmin(c, email);
@@ -271,7 +300,7 @@ const loginService = {
 		const { password: _pwd, salt: _salt, ...safeUser } = userRow;
 
 		const uuid = uuidv4();
-		const jwt = await JwtUtils.generateToken(c, { userId: userRow.userId, token: uuid }, constant.TOKEN_EXPIRE);
+		const jwt = await JwtUtils.generateToken(c, { userId: userRow.userId, token: uuid, gen: constant.AUTH_GEN }, constant.TOKEN_EXPIRE);
 
 		let authInfo = await c.env.kv.get(KvConst.AUTH_INFO + userRow.userId, { type: 'json' });
 

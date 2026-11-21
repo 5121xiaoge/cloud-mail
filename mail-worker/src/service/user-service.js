@@ -3,7 +3,7 @@ import accountService from './account-service';
 import orm from '../entity/orm';
 import user from '../entity/user';
 import { and, asc, count, desc, eq, inArray, sql } from 'drizzle-orm';
-import { emailConst, isDel, roleConst, userConst } from '../const/entity-const';
+import { emailConst, isDel, roleConst, settingConst, userConst } from '../const/entity-const';
 import kvConst from '../const/kv-const';
 import KvConst from '../const/kv-const';
 import cryptoUtils from '../utils/crypto-utils';
@@ -21,6 +21,8 @@ import oauthService from "./oauth-service";
 import adminMode from '../security/admin-mode';
 import userContext from '../security/user-context';
 import paramUtils from '../utils/param-utils';
+import settingService from './setting-service';
+import starService from './star-service';
 
 const userService = {
 
@@ -125,12 +127,25 @@ const userService = {
 
 	async updatePasswordHash(c, userId, hash, salt) {
 		await orm(c).update(user).set({ password: hash, salt: salt }).where(eq(user.userId, userId)).run();
+
+		// 个人设置改密：会话列表只留当前 uuid，其它设备下线。管理员改别人密码不走这里。
+		if (c.get?.('user')?.userId !== userId) {
+			return;
+		}
+
+		const sessionToken = await userContext.getToken(c);
+		const authInfo = await c.env.kv.get(KvConst.AUTH_INFO + userId, { type: 'json' });
+		if (!authInfo) {
+			return;
+		}
+		authInfo.tokens = sessionToken ? [sessionToken] : [];
+		await c.env.kv.put(KvConst.AUTH_INFO + userId, JSON.stringify(authInfo), { expirationTtl: constant.TOKEN_EXPIRE });
 	},
 
 	selectByEmail(c, email) {
 		return orm(c).select().from(user).where(
 			and(
-				eq(user.email, email),
+				sql`${user.email} COLLATE NOCASE = ${email}`,
 				eq(user.isDel, isDel.NORMAL)))
 			.get();
 	},
@@ -157,6 +172,12 @@ const userService = {
 	},
 
 	async delete(c, userId) {
+		const { syncDelete } = await settingService.query(c);
+		if (syncDelete === settingConst.syncDelete.OPEN) {
+			await this.physicsDelete(c, { userIds: String(userId) });
+			await c.env.kv.delete(kvConst.AUTH_INFO + userId)
+			return;
+		}
 		await orm(c).update(user).set({ isDel: isDel.DELETE }).where(eq(user.userId, userId)).run();
 		await c.env.kv.delete(kvConst.AUTH_INFO + userId)
 	},
@@ -188,7 +209,7 @@ const userService = {
 
 
 		if (email) {
-			conditions.push(sql`${user.email} COLLATE NOCASE LIKE ${'%'+ email + '%'}`);
+			conditions.push(sql`${user.email} COLLATE NOCASE LIKE ${email + '%'}`);
 		}
 
 
@@ -202,7 +223,8 @@ const userService = {
 			username: oauth.username,
 			trustLevel: oauth.trustLevel,
 			avatar: oauth.avatar,
-			name: oauth.name
+			name: oauth.name,
+			platform: oauth.platform
 		}).from(user).leftJoin(oauth, eq(oauth.userId, user.userId))
 			.where(and(...conditions));
 
@@ -370,9 +392,38 @@ const userService = {
 			.run();
 	},
 
+	async initAdmin(c) {
+		const email = c.env.admin;
+		const password = c.env.password;
+
+		if (!email || !password) {
+			return;
+		}
+
+		const exist = await userService.selectByEmailIncludeDel(c, email);
+		if (exist) {
+			return;
+		}
+
+		const role = await roleService.selectDefaultRole(c);
+		const { salt, hash } = await cryptoUtils.hashPassword(password);
+		const userId = await userService.insert(c, {
+			email,
+			password: hash,
+			salt,
+			type: role?.roleId || 1
+		});
+		await userService.updateUserInfo(c, userId, true);
+		await accountService.insert(c, {
+			userId,
+			email,
+			name: emailUtils.getName(email)
+		});
+	},
+
 	async add(c, params) {
 
-		const { email, type, password } = params;
+		let { email, type, password } = params;
 
 		if (typeof email !== 'string' || typeof password !== 'string') {
 			throw new BizError(t('emailAndPwdEmpty'));
