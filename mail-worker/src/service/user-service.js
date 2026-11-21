@@ -18,6 +18,9 @@ import { t } from '../i18n/i18n'
 import reqUtils from '../utils/req-utils';
 import {oauth} from "../entity/oauth";
 import oauthService from "./oauth-service";
+import adminMode from '../security/admin-mode';
+import userContext from '../security/user-context';
+import paramUtils from '../utils/param-utils';
 
 const userService = {
 
@@ -64,14 +67,63 @@ const userService = {
 	},
 
 
+	// 用户自助修改密码：必须校验原密码，修改后注销其它设备的会话
 	async resetPassword(c, params, userId) {
 
-		const { password } = params;
+		const { oldPassword, password } = params || {};
 
-		if (password < 6) {
+		const userRow = await this.selectById(c, userId);
+
+		if (!userRow) {
+			throw new BizError(t('authExpired'), 401);
+		}
+
+		if (typeof oldPassword !== 'string' || !oldPassword || !await cryptoUtils.verifyPassword(oldPassword, userRow.salt, userRow.password)) {
+			throw new BizError(t('oldPwdIncorrect'));
+		}
+
+		await this.updatePassword(c, password, userId);
+
+		const token = await userContext.getToken(c);
+		const authInfo = await c.env.kv.get(KvConst.AUTH_INFO + userId, { type: 'json' });
+		if (authInfo) {
+			authInfo.tokens = token ? authInfo.tokens.filter(item => item === token) : [];
+			await c.env.kv.put(KvConst.AUTH_INFO + userId, JSON.stringify(authInfo), { expirationTtl: constant.TOKEN_EXPIRE });
+		}
+	},
+
+	async updatePassword(c, password, userId) {
+
+		if (typeof password !== 'string' || password.length < 6) {
 			throw new BizError(t('pwdMinLength'));
 		}
-		const { salt, hash } = await cryptoUtils.hashPassword(password);
+
+		if (password.length > 30) {
+			throw new BizError(t('pwdLengthLimit'));
+		}
+
+		const { salt, hash } = await cryptoUtils.hashPassword(password, c);
+		await orm(c).update(user).set({ password: hash, salt: salt }).where(eq(user.userId, userId)).run();
+	},
+
+	// 管理操作不能作用于超级管理员（超级管理员本人除外）
+	async assertNotProtected(c, userIds) {
+		const ids = Array.isArray(userIds) ? userIds : [userIds];
+		const operator = userContext.getUser(c);
+		if (adminMode.isAdmin(c, operator?.email)) return;
+		if (!adminMode.adminEmail(c)) return;
+		const rows = await orm(c).select({ email: user.email }).from(user).where(inArray(user.userId, ids.map(Number))).all();
+		if (rows.some(row => adminMode.isAdmin(c, row.email))) {
+			throw new BizError(t('protectedAdmin'), 403);
+		}
+	},
+
+	async clearSessions(c, userIds) {
+		const ids = Array.isArray(userIds) ? userIds : [userIds];
+		await Promise.all(ids.map(id => c.env.kv.delete(KvConst.AUTH_INFO + id)));
+	},
+
+	async updatePasswordHash(c, userId, hash, salt) {
 		await orm(c).update(user).set({ password: hash, salt: salt }).where(eq(user.userId, userId)).run();
 	},
 
@@ -110,26 +162,22 @@ const userService = {
 	},
 
 	async physicsDelete(c, params) {
-		let { userIds } = params;
-		userIds = userIds.split(',').map(Number);
+		const userIds = paramUtils.ids(params?.userIds);
+		await this.assertNotProtected(c, userIds);
 		await accountService.physicsDeleteByUserIds(c, userIds);
 		await oauthService.deleteByUserIds(c, userIds);
 		await orm(c).delete(user).where(inArray(user.userId, userIds)).run();
+		// 删除后立即注销这些用户的所有会话
+		await this.clearSessions(c, userIds);
 	},
 
 	async list(c, params) {
 
 		let { num, size, email, timeSort, status } = params;
 
-		size = Number(size);
-		num = Number(num);
+		({ size, offset: num } = paramUtils.page(num, size, 50, 15));
 		timeSort = Number(timeSort);
 		params.isDel = Number(params.isDel);
-		if (size > 50) {
-			size = 50;
-		}
-
-		num = (num - 1) * size;
 
 		const conditions = [];
 
@@ -165,7 +213,11 @@ const userService = {
 			query.orderBy(desc(user.userId));
 		}
 
-		const list = await query.limit(size).offset(num);
+		const list = (await query.limit(size).offset(num)).map(row => {
+			// 不向前端返回密码哈希与盐
+			const { password: _password, salt: _salt, ...rest } = row;
+			return rest;
+		});
 
 		const { total } = await orm(c)
 			.select({ total: count() })
@@ -258,14 +310,18 @@ const userService = {
 
 	async setPwd(c, params) {
 
-		const { password, userId } = params;
-		await this.resetPassword(c, { password }, userId);
+		const { password } = params || {};
+		const userId = paramUtils.id(params?.userId);
+		await this.assertNotProtected(c, userId);
+		await this.updatePassword(c, password, userId);
 		await c.env.kv.delete(KvConst.AUTH_INFO + userId);
 	},
 
 	async setStatus(c, params) {
 
-		const { status, userId } = params;
+		const { status } = params || {};
+		const userId = paramUtils.id(params?.userId);
+		await this.assertNotProtected(c, userId);
 
 		await orm(c)
 			.update(user)
@@ -280,7 +336,9 @@ const userService = {
 
 	async setType(c, params) {
 
-		const { type, userId } = params;
+		const { type } = params || {};
+		const userId = paramUtils.id(params?.userId);
+		await this.assertNotProtected(c, userId);
 
 		const roleRow = await roleService.selectById(c, type);
 
@@ -316,6 +374,10 @@ const userService = {
 
 		const { email, type, password } = params;
 
+		if (typeof email !== 'string' || typeof password !== 'string') {
+			throw new BizError(t('emailAndPwdEmpty'));
+		}
+
 		if (!c.env.domain.includes(emailUtils.getDomain(email))) {
 			throw new BizError(t('notEmailDomain'));
 		}
@@ -334,13 +396,13 @@ const userService = {
 			throw new BizError(t('isRegAccount'));
 		}
 
-		const role = roleService.selectById(c, type);
+		const role = await roleService.selectById(c, type);
 
 		if (!role) {
 			throw new BizError(t('roleNotExist'));
 		}
 
-		const { salt, hash } = await saltHashUtils.hashPassword(password);
+		const { salt, hash } = await saltHashUtils.hashPassword(password, c);
 
 		const userId = await userService.insert(c, { email, password: hash, salt, type });
 
@@ -356,17 +418,22 @@ const userService = {
 	},
 
 	async resetSendCount(c, params) {
-		await orm(c).update(user).set({ sendCount: 0 }).where(eq(user.userId, params.userId)).run();
+		const userId = paramUtils.id(params?.userId);
+		await orm(c).update(user).set({ sendCount: 0 }).where(eq(user.userId, userId)).run();
 	},
 
 	async restore(c, params) {
-		const { userId, type } = params
+		const { type } = params || {};
+		const userId = paramUtils.id(params?.userId);
 		await orm(c)
 			.update(user)
 			.set({ isDel: isDel.NORMAL })
 			.where(eq(user.userId, userId))
 			.run();
 		const userRow = await this.selectById(c, userId);
+		if (!userRow) {
+			throw new BizError(t('notExistUser'));
+		}
 		await accountService.restoreByEmail(c, userRow.email);
 
 		if (type) {

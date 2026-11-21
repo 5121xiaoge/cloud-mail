@@ -7,6 +7,8 @@ import userService from '../service/user-service';
 import permService from '../service/perm-service';
 import { t } from '../i18n/i18n'
 import app from '../hono/hono';
+import cryptoUtils from '../utils/crypto-utils';
+import adminMode from './admin-mode';
 
 const exclude = [
 	'/login',
@@ -42,6 +44,7 @@ const requirePerms = [
 	'/setting/deleteBackground',
 	'/setting/set',
 	'/setting/query',
+	'/setting/setBlacklist',
 	'/user/delete',
 	'/user/setPwd',
 	'/user/setStatus',
@@ -91,8 +94,9 @@ app.use('*', async (c, next) => {
 
 	const path = c.req.path;
 
+	// 精确匹配或按路径段匹配，避免 /loginXxx 之类的路径被误放行
 	const index = exclude.findIndex(item => {
-		return path.startsWith(item);
+		return path === item || path.startsWith(item + '/');
 	});
 
 	if (index > -1) {
@@ -103,7 +107,7 @@ app.use('*', async (c, next) => {
 
 		const userPublicToken = await c.env.kv.get(KvConst.PUBLIC_KEY);
 		const publicToken = c.req.header(constant.TOKEN_HEADER);
-		if (publicToken !== userPublicToken) {
+		if (!userPublicToken || !cryptoUtils.safeEqual(publicToken, userPublicToken)) {
 			throw new BizError(t('publicTokenFail'), 401);
 		}
 		return await next();
@@ -129,6 +133,12 @@ app.use('*', async (c, next) => {
 		throw new BizError(t('authExpired'), 401);
 	}
 
+	// 超级管理员单用户模式：非管理员的历史会话一律失效
+	if (adminMode.isAdminOnly(c) && !adminMode.isAdmin(c, authInfo.user?.email)) {
+		await c.env.kv.delete(KvConst.AUTH_INFO + userId);
+		throw new BizError(t('adminOnly'), 401);
+	}
+
 	const permIndex = requirePerms.findIndex(item => {
 		return path.startsWith(item);
 	});
@@ -143,7 +153,7 @@ app.use('*', async (c, next) => {
 			return path.startsWith(item);
 		});
 
-		if (userPermIndex === -1 && authInfo.user.email !== c.env.admin) {
+		if (userPermIndex === -1 && !adminMode.isAdmin(c, authInfo.user.email)) {
 			throw new BizError(t('unauthorized'), 403);
 		}
 

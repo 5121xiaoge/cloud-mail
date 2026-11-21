@@ -4,8 +4,8 @@ export function loginUserInfo(accountId) {
     return http.get('/my/loginUserInfo', {params: {accountId}})
 }
 
-export function resetPassword(password) {
-    return http.put('/my/resetPassword', {password})
+export function resetPassword(oldPassword, password) {
+    return http.put('/my/resetPassword', {oldPassword, password})
 }
 
 export function userDelete() {

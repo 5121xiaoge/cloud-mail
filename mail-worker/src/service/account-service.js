@@ -12,6 +12,7 @@ import turnstileService from './turnstile-service';
 import roleService from './role-service';
 import { t } from '../i18n/i18n';
 import verifyRecordService from './verify-record-service';
+import paramUtils from '../utils/param-utils';
 
 const accountService = {
 
@@ -142,10 +143,14 @@ const accountService = {
 
 	async delete(c, params, userId) {
 
-		let { accountId } = params;
+		const accountId = paramUtils.id(params?.accountId);
 
 		const user = await userService.selectById(c, userId);
 		const accountRow = await this.selectById(c, accountId);
+
+		if (!accountRow || !user) {
+			throw new BizError(t('noUserAccount'));
+		}
 
 		if (accountRow.email === user.email) {
 			throw new BizError(t('delMyAccount'));
@@ -210,7 +215,10 @@ const accountService = {
 	},
 
 	async setName(c, params, userId) {
-		const { name, accountId } = params
+		const { name, accountId } = params || {}
+		if (typeof name !== 'string' || !name.trim()) {
+			throw new BizError(t('paramError'));
+		}
 		if (name.length > 30) {
 			throw new BizError(t('usernameLengthLimit'));
 		}
@@ -221,18 +229,14 @@ const accountService = {
 
 		let { userId, num, size } = params
 
-		userId = Number(userId)
-
-		num = Number(num)
-		size = Number(size)
-
-		if (size > 30) {
-			size = 30;
-		}
-
-		num = (num - 1) * size;
+		userId = paramUtils.id(userId);
+		({ size, offset: num } = paramUtils.page(num, size, 30, 10));
 
 		const userRow = await userService.selectByIdIncludeDel(c, userId);
+
+		if (!userRow) {
+			return { list: [], total: 0 };
+		}
 
 		const list = await orm(c).select().from(account).where(and(eq(account.userId, userId),ne(account.email,userRow.email))).limit(size).offset(num);
 		const { total } = await orm(c).select({ total: count() }).from(account).where(eq(account.userId, userId)).get();
@@ -241,7 +245,10 @@ const accountService = {
 	},
 
 	async physicsDelete(c, params) {
-		const { accountId } = params
+		const accountId = paramUtils.id(params?.accountId);
+		const accountRow = await orm(c).select().from(account).where(eq(account.accountId, accountId)).get();
+		if (!accountRow) return;
+		await userService.assertNotProtected(c, accountRow.userId);
 		await emailService.physicsDeleteByAccountId(c, accountId)
 		await orm(c).delete(account).where(eq(account.accountId, accountId)).run();
 	},
@@ -250,7 +257,7 @@ const accountService = {
 		let a = null
 		const { accountId } = params;
 		const accountRow = await this.selectById(c, accountId);
-		if (accountRow.userId !== userId) {
+		if (!accountRow || accountRow.userId !== userId) {
 			return;
 		}
 		await orm(c).update(account).set({ allReceive: accountConst.allReceive.CLOSE }).where(eq(account.userId, userId)).run();

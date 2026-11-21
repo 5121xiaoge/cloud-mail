@@ -161,6 +161,7 @@ import {useUiStore} from "@/store/ui.js";
 import {hasPerm} from "@/perm/perm.js"
 import {useI18n} from "vue-i18n";
 import {AccountAllReceiveEnum} from "@/enums/account-enum.js";
+import {loadTurnstile} from "@/utils/turnstile.js";
 
 const {t} = useI18n();
 const userStore = useUserStore();
@@ -496,17 +497,15 @@ function submit() {
   if (!verifyToken && (settingStore.settings.addEmailVerify === 0 || (settingStore.settings.addEmailVerify === 2 && settingStore.settings.addVerifyOpen))) {
     if (!verifyShow.value) {
       verifyShow.value = true
-      nextTick(() => {
+      loadTurnstile().then(() => nextTick(() => {
         if (!turnstileId) {
-          try {
-            turnstileId = window.turnstile.render('.add-email-turnstile')
-          } catch (e) {
-            botJsError.value = true
-            console.log('人机验证js加载失败')
-          }
+          turnstileId = window.turnstile.render('.add-email-turnstile')
         } else {
-          window.turnstile.reset('.add-email-turnstile')
+          window.turnstile.reset(turnstileId)
         }
+      })).catch(() => {
+        botJsError.value = true
+        console.warn('人机验证js加载失败')
       })
     } else if (!botJsError.value) {
       ElMessage({
@@ -537,14 +536,16 @@ function submit() {
   }).catch(res => {
     if (res.code === 400) {
       verifyToken = ''
-      if (turnstileId) {
-        window.turnstile.reset(turnstileId)
-      } else {
-        nextTick(() => {
-          turnstileId = window.turnstile.render('.add-email-turnstile')
-        })
-      }
       verifyShow.value = true
+      loadTurnstile().then(() => nextTick(() => {
+        if (turnstileId) {
+          window.turnstile.reset(turnstileId)
+        } else {
+          turnstileId = window.turnstile.render('.add-email-turnstile')
+        }
+      })).catch(() => {
+        botJsError.value = true
+      })
     }
     addLoading.value = false
   })

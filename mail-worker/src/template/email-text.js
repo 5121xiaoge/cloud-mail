@@ -1,3 +1,5 @@
+import { escapeHtml } from '../utils/html-sanitize';
+
 export default function emailTextTemplate(text) {
 	return `<!DOCTYPE html>
 <html lang='en' >
@@ -21,7 +23,7 @@ export default function emailTextTemplate(text) {
         }
 
         span {
-        		font-family: inherit;
+        		font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 						white-space: pre-wrap;
 						word-break: break-word;
         }
@@ -29,7 +31,7 @@ export default function emailTextTemplate(text) {
     </style>
 </head>
 <body>
-<span>${text}</span>
+<span>${escapeHtml(text)}</span>
 </body>
 </html>`
 }

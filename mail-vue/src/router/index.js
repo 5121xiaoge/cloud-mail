@@ -114,29 +114,16 @@ router.beforeEach((to, from, next) => {
 
 function loadBackground(next) {
 
+    // 首屏优化：不再等待背景图加载完成（原先最多阻塞 3 秒），只在后台预加载，页面立即渲染
     const settingStore = useSettingStore();
 
     if (settingStore.settings.background) {
-
-        const src = cvtR2Url(settingStore.settings.background);
-
         const img = new Image();
-        let completed = false;
-        const finish = () => {
-            if (completed) return;
-            completed = true;
-            clearTimeout(timeout);
-            img.onload = img.onerror = null;
-            next()
-        };
-        const timeout = setTimeout(finish, 3000)
-        img.onload = img.onerror = finish;
-        img.src = src;
-
-    } else {
-        next()
+        img.decoding = 'async';
+        img.src = cvtR2Url(settingStore.settings.background);
     }
 
+    next()
 }
 
 router.afterEach((to) => {

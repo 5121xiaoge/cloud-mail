@@ -1,15 +1,32 @@
 import settingService from '../service/setting-service';
 import emailUtils from '../utils/email-utils';
 import {emailConst} from "../const/entity-const";
+import cryptoUtils from '../utils/crypto-utils';
+import loginGuard from '../security/login-guard';
 
 const dbInit = {
 	async init(c) {
 
-		const secret = c.req.param('secret');
+		c.header('Cache-Control', 'no-store');
+		c.header('Referrer-Policy', 'no-referrer');
 
-		if (secret !== c.env.jwt_secret) {
-			return c.text('❌ JWT secret mismatch');
+		// 初始化完成后可设置 init_disabled = true 彻底关闭该入口
+		if (c.env.init_disabled === true || c.env.init_disabled === 'true') {
+			return c.text('Not Found', 404);
 		}
+
+		const secret = c.req.param('secret');
+		// 优先使用独立的 init_secret，未配置时兼容旧的 jwt_secret
+		const expected = String(c.env.init_secret || c.env.jwt_secret || '');
+
+		const guardState = await loginGuard.check(c, '__init__');
+
+		if (!expected || !cryptoUtils.safeEqual(String(secret || ''), expected)) {
+			await loginGuard.recordFailure(c, guardState);
+			return c.text('❌ secret mismatch', 403);
+		}
+
+		await loginGuard.clear(c, guardState);
 
 		await this.intDB(c);
 		await this.v1_1DB(c);

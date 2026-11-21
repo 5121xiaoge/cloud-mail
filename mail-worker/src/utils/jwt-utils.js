@@ -1,3 +1,5 @@
+import BizError from '../error/biz-error';
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -11,6 +13,24 @@ const base64urlDecode = (str) => {
 	while (str.length % 4) str += '=';
 	return Uint8Array.from(atob(str), c => c.charCodeAt(0));
 };
+
+function getSecret(c) {
+	const secret = c?.env?.jwt_secret;
+	if (!secret) {
+		throw new BizError('jwt_secret 未配置 jwt_secret is not configured', 502);
+	}
+	return String(secret);
+}
+
+function hmacKey(c, usage) {
+	return crypto.subtle.importKey(
+		'raw',
+		encoder.encode(getSecret(c)),
+		{ name: 'HMAC', hash: 'SHA-256' },
+		false,
+		[usage]
+	);
+}
 
 const jwtUtils = {
 	async generateToken(c, payload, expiresInSeconds) {
@@ -32,14 +52,7 @@ const jwtUtils = {
 		const payloadStr = base64url(encoder.encode(JSON.stringify(fullPayload)));
 		const data = `${headerStr}.${payloadStr}`;
 
-		const key = await crypto.subtle.importKey(
-			'raw',
-			encoder.encode(c.env.jwt_secret),
-			{ name: 'HMAC', hash: 'SHA-256' },
-			false,
-			['sign']
-		);
-
+		const key = await hmacKey(c, 'sign');
 		const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
 		const signatureStr = base64url(signature);
 
@@ -47,19 +60,22 @@ const jwtUtils = {
 	},
 
 	async verifyToken(c, token) {
-		try {
-			const [headerB64, payloadB64, signatureB64] = token.split('.');
 
-			if (!headerB64 || !payloadB64 || !signatureB64) return null;
+		if (typeof token !== 'string' || !token || token.length > 4096) return null;
+
+		const parts = token.split('.');
+		if (parts.length !== 3) return null;
+
+		const [headerB64, payloadB64, signatureB64] = parts;
+		if (!headerB64 || !payloadB64 || !signatureB64) return null;
+
+		const key = await hmacKey(c, 'verify');
+
+		try {
+			const header = JSON.parse(decoder.decode(base64urlDecode(headerB64)));
+			if (header?.alg !== 'HS256') return null;
 
 			const data = `${headerB64}.${payloadB64}`;
-			const key = await crypto.subtle.importKey(
-				'raw',
-				encoder.encode(c.env.jwt_secret),
-				{ name: 'HMAC', hash: 'SHA-256' },
-				false,
-				['verify']
-			);
 
 			const valid = await crypto.subtle.verify(
 				'HMAC',
@@ -70,8 +86,7 @@ const jwtUtils = {
 
 			if (!valid) return null;
 
-			const payloadJson = decoder.decode(base64urlDecode(payloadB64));
-			const payload = JSON.parse(payloadJson);
+			const payload = JSON.parse(decoder.decode(base64urlDecode(payloadB64)));
 
 			const now = Math.floor(Date.now() / 1000);
 			if (payload.exp && payload.exp < now) return null;
@@ -79,7 +94,6 @@ const jwtUtils = {
 			return payload;
 
 		} catch (err) {
-			console.log(err)
 			return null;
 		}
 	}

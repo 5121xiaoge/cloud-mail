@@ -26,8 +26,13 @@ html, body {
     font-weight: bold !important;
 }
 
+/* 系统字体：不依赖任何网络字体，首屏零字体请求 */
+:root {
+    --cm-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", "Noto Sans", Roboto, "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+}
+
 body {
-    font-family: -apple-system, Inter, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+    font-family: var(--cm-font-family);
     line-height: 1.5;
     color: var(--el-text-color-primary);
     font-size: 14px;

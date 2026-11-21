@@ -21,11 +21,12 @@ const attService = {
 				contentType: attachment.mimeType,
 			}
 
-			if (!attachment.contentId) {
-				metadate.contentDisposition = `attachment;filename=${attachment.filename}`
-			} else {
-				metadate.contentDisposition = `inline;filename=${attachment.filename}`
+			// 仅安全图片允许内联展示，其余（HTML/SVG/脚本等）一律作为附件下载
+			if (attachment.contentId && fileUtils.isInlineSafe(attachment.mimeType)) {
+				metadate.contentDisposition = fileUtils.contentDisposition('inline', attachment.filename)
 				metadate.cacheControl = `max-age=259200`
+			} else {
+				metadate.contentDisposition = fileUtils.contentDisposition('attachment', attachment.filename)
 			}
 
 			for (let attempt = 0; ; attempt++) {
@@ -176,7 +177,7 @@ const attService = {
 		for (let att of attList) {
 			await r2Service.putObj(c, att.key, att.buff, {
 				contentType: att.type,
-				contentDisposition: `attachment;filename=${att.filename}`
+				contentDisposition: fileUtils.contentDisposition('attachment', att.filename)
 			});
 		}
 
@@ -195,7 +196,7 @@ const attService = {
 			await r2Service.putObj(c, attData.key, attData.buff, {
 				contentType: attData.mimeType,
 				cacheControl: `max-age=259200`,
-				contentDisposition: `inline;filename=${attData.filename}`
+				contentDisposition: fileUtils.contentDisposition(fileUtils.isInlineSafe(attData.mimeType) ? 'inline' : 'attachment', attData.filename)
 			});
 			delete attData.buff;
 		}

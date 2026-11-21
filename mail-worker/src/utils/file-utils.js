@@ -1,4 +1,38 @@
+// 允许在浏览器中直接内联打开的类型（不含 SVG / HTML 等可执行脚本的类型）
+const INLINE_SAFE_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/bmp', 'image/avif', 'image/x-icon', 'image/vnd.microsoft.icon'];
+
 const fileUtils = {
+
+	isInlineSafe(contentType) {
+		const type = String(contentType || '').split(';')[0].trim().toLowerCase();
+		return INLINE_SAFE_TYPES.includes(type);
+	},
+
+	// 生成符合 RFC 6266 / 5987 的 Content-Disposition，文件名含中文、空格、分号时不会破坏响应头
+	contentDisposition(type, filename) {
+		const name = String(filename || 'file').replace(/[\r\n"\\]/g, '_').slice(0, 200);
+		const ascii = name.replace(/[^\x20-\x7e]/g, '_').replace(/[;%]/g, '_') || 'file';
+		return `${type}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+	},
+
+	// 输出存储对象时统一使用的安全响应头：非图片一律下载，禁止嗅探，禁止脚本执行
+	safeObjHeaders(contentType, contentDisposition, cacheControl) {
+		const type = contentType || 'application/octet-stream';
+		let disposition = contentDisposition || '';
+		if (!this.isInlineSafe(type)) {
+			disposition = /^\s*inline/i.test(disposition) ? disposition.replace(/^\s*inline/i, 'attachment') : (disposition || 'attachment');
+			if (!/^\s*attachment/i.test(disposition)) disposition = 'attachment';
+		}
+		const headers = {
+			'Content-Type': type,
+			'X-Content-Type-Options': 'nosniff',
+			'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox",
+			'Cross-Origin-Resource-Policy': 'cross-origin'
+		};
+		if (disposition) headers['Content-Disposition'] = disposition;
+		if (cacheControl) headers['Cache-Control'] = cacheControl;
+		return headers;
+	},
 	getExtFileName(filename) {
 		try {
 			const index = filename.lastIndexOf('.');
@@ -35,7 +69,7 @@ const fileUtils = {
 	 * @returns {File} File 对象
 	 */
 	base64ToFile(base64Data, customFilename) {
-		const match = base64Data.match(/^data:(image|jpeg|video)\/([a-zA-Z0-9.+-]+);base64,/);
+		const match = typeof base64Data === 'string' && base64Data.match(/^data:(image|jpeg|video)\/([a-zA-Z0-9.+-]+);base64,/);
 		if (!match) {
 			throw new Error('Invalid base64 data format');
 		}

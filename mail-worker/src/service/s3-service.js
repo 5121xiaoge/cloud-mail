@@ -2,6 +2,7 @@ import { S3Client, PutObjectCommand, DeleteObjectsCommand, GetObjectCommand } fr
 import settingService from './setting-service';
 import domainUtils from '../utils/domain-uitls';
 import { settingConst } from '../const/entity-const';
+import fileUtils from '../utils/file-utils';
 const s3Service = {
 
 	async putObj(c, key, content, metadata) {
@@ -78,17 +79,19 @@ const s3Service = {
 	async getObj(c, key) {
 		const client = await this.client(c);
 		const { bucket } = await settingService.query(c);
-		const result = await client.send(new GetObjectCommand({
-			Bucket: bucket,
-			Key: key
-		}));
+		let result;
+		try {
+			result = await client.send(new GetObjectCommand({
+				Bucket: bucket,
+				Key: key
+			}));
+		} catch (e) {
+			if (e?.name === 'NoSuchKey' || e?.$metadata?.httpStatusCode === 404) return null;
+			throw e;
+		}
 
 		return new Response(result.Body, {
-			headers: {
-				'Content-Type': result.ContentType || 'application/octet-stream',
-				'Content-Disposition': result.ContentDisposition || null,
-				'Cache-Control': result.CacheControl || null
-			}
+			headers: fileUtils.safeObjHeaders(result.ContentType, result.ContentDisposition, result.CacheControl)
 		});
 	},
 

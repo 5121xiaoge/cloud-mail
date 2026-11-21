@@ -14,7 +14,7 @@
                 <div><span>{{ $t('websiteReg') }}</span></div>
                 <div>
                   <el-switch @change="change" :before-change="beforeChange" :active-value="0" :inactive-value="1"
-                             v-model="setting.register"/>
+                             :disabled="setting.adminOnly" v-model="setting.register"/>
                 </div>
               </div>
               <div class="setting-item">

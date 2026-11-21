@@ -22,7 +22,8 @@ const telegramService = {
 
 		const result = await jwtUtils.verifyToken(c, token);
 
-		if (!result) {
+		// 仅接受专用的邮件查看令牌，拒绝登录令牌等其他用途的 JWT
+		if (!result || !result.emailId || result.userId) {
 			return emailTextTemplate('Access denied')
 		}
 
@@ -49,7 +50,8 @@ const telegramService = {
 
 		const tgChatIds = tgChatId.split(',');
 
-		const jwtToken = await jwtUtils.generateToken(c, { emailId: email.emailId })
+		// 查看链接 30 天后失效
+		const jwtToken = await jwtUtils.generateToken(c, { emailId: email.emailId }, 60 * 60 * 24 * 30)
 
 		const webAppUrl = customDomain ? `${domainUtils.toOssDomain(customDomain)}/api/telegram/getEmail/${jwtToken}` : 'https://www.cloudflare.com/404'
 		const inlineKeyboard = [

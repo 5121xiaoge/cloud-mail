@@ -4,11 +4,11 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"/>
   <meta name="theme-color" content="#F1F1F1" id="theme-color-meta">
-  <meta name="description" content="Cloud Mail 是一个 Serverless 响应式邮箱服务，支持邮件发送，可部署到 Cloudflare 平台，降低服务器成本。Cloud Mail is a serverless responsive email service that supports email sending and can be deployed on Cloudflare to reduce server costs.">
+  <meta name="description" content="Cloud Mail 企业邮件平台 · Enterprise mail platform">
   <title>Cloud Mail</title>
   <link rel="icon" href="/mail.png" type="image/png">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
-  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+  <!-- 首屏优化：不再加载 Google Fonts（使用系统字体）；人机验证脚本改为需要时按需加载 -->
+  <link rel="preload" href="/mail-pwa.png" as="image">
   <script>
     try {
     const uiStoreStr =  localStorage.getItem('ui')
@@ -28,6 +28,7 @@
 <style>
   html {
     background: #FFFFFF;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", "Noto Sans", Roboto, "Helvetica Neue", Arial, sans-serif;
   }
   .dark {
     background: #141414;

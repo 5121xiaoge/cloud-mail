@@ -4,12 +4,16 @@ import i18n from "@/i18n/index.js";
 import {useSettingStore} from "@/store/setting.js";
 
 let http = axios.create({
-    baseURL: import.meta.env.VITE_BASE_URL
+    baseURL: import.meta.env.VITE_BASE_URL,
+    timeout: 60000
 });
 
 http.interceptors.request.use(config => {
     const { lang } = useSettingStore();
-    config.headers.Authorization = `${localStorage.getItem('token')}`
+    const token = localStorage.getItem('token')
+    if (token) {
+        config.headers.Authorization = token
+    }
     config.headers['accept-language'] = lang
     return config
 })
@@ -64,8 +68,9 @@ http.interceptors.response.use((res) => {
                     repeatNum: -4,
                 })
                 reject(data)
+            } else {
+                resolve(data.data)
             }
-            resolve(data.data)
         })
     },
     (error) => {
@@ -89,7 +94,6 @@ http.interceptors.response.use((res) => {
                 plain: true,
                 grouping: true
             })
-            ElMessage.error('')
         } else if (error.response) {
             ElMessage({
                 message: i18n.global.t('serverBusyErrorMsg'),

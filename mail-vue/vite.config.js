@@ -55,7 +55,19 @@ export default defineConfig(({mode}) => {
             target: 'es2022',
             outDir: env.VITE_OUT_DIR || 'dist',
             emptyOutDir: true,
-            assetsInclude: ['**/*.json']
+            assetsInclude: ['**/*.json'],
+            cssCodeSplit: true,
+            chunkSizeWarningLimit: 1200,
+            rollupOptions: {
+                output: {
+                    // 框架代码单独分包，业务更新时浏览器可继续使用缓存的框架包
+                    manualChunks(id) {
+                        if (!id.includes('node_modules')) return
+                        if (/[\\/]node_modules[\\/](\.pnpm[\\/])?(@vue|vue|vue-router|pinia|vue-i18n|@intlify)[@\\/]/.test(id)) return 'vendor-vue'
+                        if (/[\\/]node_modules[\\/](\.pnpm[\\/])?(element-plus|@element-plus)[@\\/]/.test(id)) return 'vendor-element'
+                    }
+                }
+            }
         }
     }
 })

@@ -26,14 +26,29 @@ export default {
 	email: email,
 	async scheduled(c, env, ctx) {
 		if (c.cron === '*/30 * * * *') {
-			await analysisService.refreshEchartsCache({ env })
+			try {
+				await analysisService.refreshEchartsCache({ env })
+			} catch (e) {
+				console.error('定时任务 refreshEchartsCache 执行失败', e);
+			}
 			return;
 		}
 
-		await verifyRecordService.clearRecord({ env })
-		await userService.resetDaySendCount({ env })
-		await emailService.completeReceiveAll({ env })
-		await oauthService.clearNoBindOathUser({ env })
-		await analysisService.refreshEchartsCache({ env })
+		// 每个任务独立执行，某一步失败不影响后续任务
+		const tasks = [
+			['clearRecord', () => verifyRecordService.clearRecord({ env })],
+			['resetDaySendCount', () => userService.resetDaySendCount({ env })],
+			['completeReceiveAll', () => emailService.completeReceiveAll({ env })],
+			['clearNoBindOathUser', () => oauthService.clearNoBindOathUser({ env })],
+			['refreshEchartsCache', () => analysisService.refreshEchartsCache({ env })]
+		];
+
+		for (const [name, task] of tasks) {
+			try {
+				await task();
+			} catch (e) {
+				console.error(`定时任务 ${name} 执行失败`, e);
+			}
+		}
 	},
 };

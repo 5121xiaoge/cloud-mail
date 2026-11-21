@@ -19,12 +19,22 @@ import dayjs from 'dayjs';
 import { toUtc } from '../utils/date-uitil';
 import { t } from '../i18n/i18n.js';
 import verifyRecordService from './verify-record-service';
+import loginGuard from '../security/login-guard';
+import adminMode from '../security/admin-mode';
 
 const loginService = {
 
 	async register(c, params, oauth = false) {
 
-		const { email, password, token, code } = params;
+		if (adminMode.isAdminOnly(c)) {
+			throw new BizError(t('regDisabled'));
+		}
+
+		const { email, password, token, code } = params || {};
+
+		if (typeof email !== 'string' || typeof password !== 'string') {
+			throw new BizError(t('emailAndPwdEmpty'));
+		}
 
 		let { regKey, register, registerVerify, regVerifyCount, minEmailPrefix, emailPrefixFilter } = await settingService.query(c)
 
@@ -126,7 +136,7 @@ const loginService = {
 			}
 		}
 
-		const { salt, hash } = await saltHashUtils.hashPassword(password);
+		const { salt, hash } = await saltHashUtils.hashPassword(password, c);
 
 		const userId = await userService.insert(c, { email, regKeyId,password: hash, salt, type: type || defType });
 
@@ -201,16 +211,42 @@ const loginService = {
 
 	async login(c, params, noVerifyPwd = false) {
 
-		const { email, password } = params;
+		const { email, password } = params || {};
 
-		if ((!email || !password) && !noVerifyPwd) {
+		if (typeof email !== 'string' || !email.trim()) {
 			throw new BizError(t('emailAndPwdEmpty'));
 		}
 
-		const userRow = await userService.selectByEmailIncludeDel(c, email);
+		if (!noVerifyPwd && (typeof password !== 'string' || !password)) {
+			throw new BizError(t('emailAndPwdEmpty'));
+		}
+
+		if (adminMode.isAdminOnly(c) && !adminMode.adminEmail(c)) {
+			throw new BizError(t('adminNotConfigured'), 502);
+		}
+
+		const guardState = noVerifyPwd ? null : await loginGuard.check(c, email);
+
+		// 超级管理员单用户模式：非管理员账号按“账号不存在”处理，提示与耗时一致，避免枚举
+		const allowed = !adminMode.isAdminOnly(c) || adminMode.isAdmin(c, email);
+		const userRow = allowed ? await userService.selectByEmailIncludeDel(c, email) : null;
+
+		if (!noVerifyPwd) {
+
+			const pwdValid = userRow
+				? await cryptoUtils.verifyPassword(password, userRow.salt, userRow.password)
+				: await cryptoUtils.dummyVerify(password, c);
+
+			if (!pwdValid) {
+				await loginGuard.recordFailure(c, guardState);
+				throw new BizError(t('invalidCredentials'));
+			}
+
+			await loginGuard.clear(c, guardState);
+		}
 
 		if (!userRow) {
-			throw new BizError(t('notExistUser'));
+			throw new BizError(allowed ? t('notExistUser') : t('adminOnly'));
 		}
 
 		if(userRow.isDel === isDel.DELETE) {
@@ -221,28 +257,38 @@ const loginService = {
 			throw new BizError(t('isBanUser'));
 		}
 
-		if (!await cryptoUtils.verifyPassword(password, userRow.salt, userRow.password) && !noVerifyPwd) {
-			throw new BizError(t('IncorrectPwd'));
+		// 旧版 SHA-256 哈希在登录成功后自动升级为 PBKDF2
+		if (!noVerifyPwd && cryptoUtils.needsRehash(userRow.password, c)) {
+			try {
+				const { salt, hash } = await cryptoUtils.hashPassword(password, c);
+				await userService.updatePasswordHash(c, userRow.userId, hash, salt);
+			} catch (e) {
+				console.warn('密码哈希升级失败', e.message);
+			}
 		}
 
+		// KV 会话中不保存密码哈希与盐
+		const { password: _pwd, salt: _salt, ...safeUser } = userRow;
+
 		const uuid = uuidv4();
-		const jwt = await JwtUtils.generateToken(c,{ userId: userRow.userId, token: uuid });
+		const jwt = await JwtUtils.generateToken(c, { userId: userRow.userId, token: uuid }, constant.TOKEN_EXPIRE);
 
 		let authInfo = await c.env.kv.get(KvConst.AUTH_INFO + userRow.userId, { type: 'json' });
 
 		if (authInfo && (authInfo.user.email === userRow.email)) {
 
-			if (authInfo.tokens.length > 10) {
+			if (authInfo.tokens.length >= 10) {
 				authInfo.tokens.shift();
 			}
 
 			authInfo.tokens.push(uuid);
+			authInfo.user = safeUser;
 
 		} else {
 
 			authInfo = {
 				tokens: [],
-				user: userRow,
+				user: safeUser,
 				refreshTime: dayjs().toISOString()
 			};
 
@@ -257,11 +303,13 @@ const loginService = {
 	},
 
 	async logout(c, userId) {
-		const token =userContext.getToken(c);
+		const token = await userContext.getToken(c);
 		const authInfo = await c.env.kv.get(KvConst.AUTH_INFO + userId, { type: 'json' });
-		const index = authInfo.tokens.findIndex(item => item === token);
-		authInfo.tokens.splice(index, 1);
-		await c.env.kv.put(KvConst.AUTH_INFO + userId, JSON.stringify(authInfo));
+		if (!authInfo || !token) {
+			return;
+		}
+		authInfo.tokens = authInfo.tokens.filter(item => item !== token);
+		await c.env.kv.put(KvConst.AUTH_INFO + userId, JSON.stringify(authInfo), { expirationTtl: constant.TOKEN_EXPIRE });
 	}
 
 };

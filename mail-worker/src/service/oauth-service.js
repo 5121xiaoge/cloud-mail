@@ -5,34 +5,66 @@ import { eq, inArray } from 'drizzle-orm';
 import userService from "./user-service";
 import loginService from "./login-service";
 import cryptoUtils from "../utils/crypto-utils";
+import jwtUtils from "../utils/jwt-utils";
+import { t } from "../i18n/i18n";
+import adminMode from "../security/admin-mode";
+
+const OAUTH_BIND_PURPOSE = 'oauth-bind';
+const OAUTH_BIND_EXPIRE = 60 * 30;
 
 const oauthService = {
 
 	async bindUser(c, params) {
 
-		const { email, oauthUserId, code } = params;
-
-		const oauthRow = await this.getById(c, oauthUserId);
-
-		let userRow = await userService.selectByIdIncludeDel(c, oauthRow.userId);
-
-		if (userRow) {
-			throw new BizError('用户已绑定有邮箱')
+		if (adminMode.isAdminOnly(c)) {
+			throw new BizError(t('oauthDisabled'));
 		}
 
-		await loginService.register(c, { email, password: cryptoUtils.genRandomPwd(), code }, true);
+		const { email, code, bindToken } = params || {};
 
-		userRow = await userService.selectByEmail(c, email);
+		// 绑定必须携带 LinuxDo 授权后签发的短期凭证，防止伪造 oauthUserId 抢绑
+		const ticket = await jwtUtils.verifyToken(c, bindToken);
 
-		orm(c).update(oauth).set({ userId: userRow.userId }).where(eq(oauth.oauthUserId, oauthUserId)).run();
+		if (!ticket || ticket.purpose !== OAUTH_BIND_PURPOSE || !ticket.oauthUserId) {
+			throw new BizError(t('oauthBindExpired'));
+		}
+
+		const oauthUserId = String(ticket.oauthUserId);
+		const oauthRow = await this.getById(c, oauthUserId);
+
+		if (!oauthRow) {
+			throw new BizError(t('oauthBindExpired'));
+		}
+
+		const boundUser = oauthRow.userId ? await userService.selectByIdIncludeDel(c, oauthRow.userId) : null;
+
+		if (boundUser) {
+			throw new BizError(t('oauthAlreadyBound'));
+		}
+
+		await loginService.register(c, { email, password: cryptoUtils.genRandomPwd(16), code }, true);
+
+		const userRow = await userService.selectByEmail(c, email);
+
+		await orm(c).update(oauth).set({ userId: userRow.userId }).where(eq(oauth.oauthUserId, oauthUserId)).run();
 		const jwtToken = await loginService.login(c, { email, password: null }, true);
 
-		return { userInfo: oauthRow, token: jwtToken}
+		return { userInfo: { ...oauthRow, userId: userRow.userId }, token: jwtToken }
 	},
 
 	async linuxDoLogin(c, params) {
 
-		const { code } = params;
+		const { code } = params || {};
+
+		const linuxdoSwitch = !adminMode.isAdminOnly(c) && (c.env.linuxdo_switch === true || c.env.linuxdo_switch === 'true');
+
+		if (!linuxdoSwitch) {
+			throw new BizError(t('oauthDisabled'));
+		}
+
+		if (typeof code !== 'string' || !code) {
+			throw new BizError(t('oauthFailed'));
+		}
 
 		let token = '';
 		let userInfo = {}
@@ -78,7 +110,8 @@ const oauthService = {
 		const userRow = await userService.selectByIdIncludeDel(c, oauthRow.userId);
 
 		if (!userRow) {
-			return { userInfo: oauthRow, token: null }
+			const bindToken = await jwtUtils.generateToken(c, { purpose: OAUTH_BIND_PURPOSE, oauthUserId: oauthRow.oauthUserId }, OAUTH_BIND_EXPIRE);
+			return { userInfo: oauthRow, token: null, bindToken }
 		}
 
 		const JwtToken = await loginService.login(c, { email: userRow.email, password: null }, true);

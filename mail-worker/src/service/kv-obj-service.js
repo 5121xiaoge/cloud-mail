@@ -1,3 +1,5 @@
+import fileUtils from '../utils/file-utils';
+
 const kvObjService = {
 
 	async putObj(c, key, content, metadata) {
@@ -24,17 +26,14 @@ const kvObjService = {
 		}
 
 		return new Response(obj.value, {
-			headers: {
-				'Content-Type': obj.metadata?.contentType || 'application/octet-stream',
-				'Content-Disposition': obj.metadata?.contentDisposition || null,
-				'Cache-Control': obj.metadata?.cacheControl || null
-			}
+			headers: fileUtils.safeObjHeaders(obj.metadata?.contentType, obj.metadata?.contentDisposition, obj.metadata?.cacheControl)
 		});
 	},
 
 	async toObjResp(c, key) {
 
-		return await this.getObj(c, key);
+		const resp = await this.getObj(c, key);
+		return resp || new Response('Not Found', { status: 404 });
 
 	}
 

@@ -1,9 +1,8 @@
 import { UAParser } from 'ua-parser-js';
 const reqUtils = {
 	getIp(c) {
-		return  c.req.header('CF-Connecting-IP') ||
-			c.req.header('X-Forwarded-For') ||
-			'Unknown';
+		// Workers 上 CF-Connecting-IP 由边缘写入且不可伪造；X-Forwarded-For 可被客户端伪造，不再使用
+		return c.req.header('CF-Connecting-IP') || 'Unknown';
 	},
 
 	getUserAgent(c) {

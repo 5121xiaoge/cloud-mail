@@ -24,6 +24,7 @@ import { att } from '../entity/att';
 import telegramService from './telegram-service';
 import { emailDelivery } from '../entity/email-delivery';
 import emailDeliveryService from './email-delivery-service';
+import paramUtils from '../utils/param-utils';
 
 const emailService = {
 
@@ -54,6 +55,9 @@ const emailService = {
 
 		if (isNaN(allReceive)) {
 			let accountRow = await accountService.selectById(c, accountId);
+			if (!accountRow || accountRow.userId !== userId) {
+				throw new BizError(t('noUserAccount'));
+			}
 			allReceive = accountRow.allReceive;
 		}
 
@@ -147,8 +151,7 @@ const emailService = {
 	},
 
 	async delete(c, params, userId) {
-		const { emailIds } = params;
-		const emailIdList = emailIds.split(',').map(Number);
+		const emailIdList = paramUtils.ids(params?.emailIds);
 		await orm(c).update(email).set({ isDel: isDel.DELETE }).where(
 			and(
 				eq(email.userId, userId),
@@ -726,6 +729,9 @@ const emailService = {
 
 		if (isNaN(allReceive)) {
 			let accountRow = await accountService.selectById(c, accountId);
+			if (!accountRow || accountRow.userId !== userId) {
+				throw new BizError(t('noUserAccount'));
+			}
 			allReceive = accountRow.allReceive;
 		}
 
@@ -753,8 +759,7 @@ const emailService = {
 	},
 
 	async physicsDelete(c, params) {
-		let { emailIds } = params;
-		emailIds = emailIds.split(',').map(Number);
+		const emailIds = paramUtils.ids(params?.emailIds);
 		await attService.removeByEmailIds(c, emailIds);
 		await starService.removeByEmailIds(c, emailIds);
 		await orm(c).delete(email).where(inArray(email.emailId, emailIds)).run();
@@ -1005,8 +1010,9 @@ const emailService = {
 	},
 
 	async read(c, params, userId) {
-		const { emailIds } = params;
-		await orm(c).update(email).set({ unread: emailConst.unread.READ }).where(and(eq(email.userId, userId), inArray(email.emailId, emailIds)));
+		const emailIds = paramUtils.ids(params?.emailIds);
+		// 原代码缺少 .run()，更新语句不会被执行
+		await orm(c).update(email).set({ unread: emailConst.unread.READ }).where(and(eq(email.userId, userId), inArray(email.emailId, emailIds))).run();
 	}
 };
 

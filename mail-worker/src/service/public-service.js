@@ -14,6 +14,9 @@ import { isDel, roleConst } from '../const/entity-const';
 import email from '../entity/email';
 import userService from './user-service';
 import KvConst from '../const/kv-const';
+import paramUtils from '../utils/param-utils';
+import loginGuard from '../security/login-guard';
+import adminMode from '../security/admin-mode';
 
 const publicService = {
 
@@ -35,18 +38,8 @@ const publicService = {
 				isDel: email.isDel,
 		}).from(email)
 
-		if (!size) {
-			size = 20
-		}
-
-		if (!num) {
-			num = 1
-		}
-
-		size = Number(size);
-		num = Number(num);
-
-		num = (num - 1) * size;
+		// 单页最多 100 条，防止一次拉取全库导致超出 Workers CPU / 内存限制
+		({ size, offset: num } = paramUtils.page(num, size, 100, 20));
 
 		let conditions = []
 
@@ -95,9 +88,9 @@ const publicService = {
 	},
 
 	async addUser(c, params) {
-		const { list } = params;
+		const { list } = params || {};
 
-		if (list.length === 0) return;
+		if (!Array.isArray(list) || list.length === 0) return;
 
 		for (const emailRow of list) {
 			if (!verifyUtils.isEmail(emailRow.email)) {
@@ -109,7 +102,8 @@ const publicService = {
 			}
 
 			const { salt, hash } = await saltHashUtils.hashPassword(
-				emailRow.password || cryptoUtils.genRandomPwd()
+				emailRow.password || cryptoUtils.genRandomPwd(),
+				c
 			);
 
 			emailRow.salt = salt;
@@ -135,14 +129,15 @@ const publicService = {
 				type = roleRow ? roleRow.roleId : type;
 			}
 
-			const userSql = `INSERT INTO user (email, password, salt, type, os, browser, active_ip, create_ip, device, active_time, create_time)
-			VALUES ('${email}', '${hash}', '${salt}', '${type}', '${os}', '${browser}', '${activeIp}', '${activeIp}', '${device}', '${activeTime}', '${activeTime}')`
+			// 参数化绑定，避免邮箱 / User-Agent 等外部输入导致 SQL 注入
+			userList.push(c.env.db.prepare(
+				`INSERT INTO user (email, password, salt, type, os, browser, active_ip, create_ip, device, active_time, create_time)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			).bind(email, hash, salt, type, os, browser, activeIp, activeIp, device, activeTime, activeTime));
 
-			const accountSql = `INSERT INTO account (email, name, user_id)
-			VALUES ('${email}', '${emailUtils.getName(email)}', 0);`;
-
-			userList.push(c.env.db.prepare(userSql));
-			userList.push(c.env.db.prepare(accountSql));
+			userList.push(c.env.db.prepare(
+				`INSERT INTO account (email, name, user_id) VALUES (?, ?, 0)`
+			).bind(email, emailUtils.getName(email)));
 
 		}
 
@@ -173,21 +168,27 @@ const publicService = {
 
 	async verifyUser(c, params) {
 
-		const { email, password } = params
+		const { email, password } = params || {}
 
-		const userRow = await userService.selectByEmailIncludeDel(c, email);
-
-		if (email !== c.env.admin) {
-			throw new BizError(t('notAdmin'));
+		if (typeof email !== 'string' || typeof password !== 'string' || !password) {
+			throw new BizError(t('emailAndPwdEmpty'));
 		}
 
-		if (!userRow || userRow.isDel === isDel.DELETE) {
-			throw new BizError(t('notExistUser'));
+		// 与登录共用防暴力破解计数
+		const guardState = await loginGuard.check(c, email);
+
+		const userRow = adminMode.isAdmin(c, email) ? await userService.selectByEmailIncludeDel(c, email) : null;
+
+		const valid = userRow && userRow.isDel !== isDel.DELETE
+			? await cryptoUtils.verifyPassword(password, userRow.salt, userRow.password)
+			: await cryptoUtils.dummyVerify(password, c);
+
+		if (!valid) {
+			await loginGuard.recordFailure(c, guardState);
+			throw new BizError(t('invalidCredentials'));
 		}
 
-		if (!await cryptoUtils.verifyPassword(password, userRow.salt, userRow.password)) {
-			throw new BizError(t('IncorrectPwd'));
-		}
+		await loginGuard.clear(c, guardState);
 	}
 
 }
