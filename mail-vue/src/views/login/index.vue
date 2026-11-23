@@ -88,12 +88,6 @@
           </ul>
         </div>
         <div class="brand-footer">
-          <span class="secure-badge">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
-                 stroke-linejoin="round" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path
-                d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>
-            {{ $t('loginPage.securedBy') }}
-          </span>
           <span>© {{ year }} {{ siteTitle }}</span>
         </div>
       </div>
@@ -805,22 +799,6 @@ function refreshWebsiteConfig() {
   gap: 12px;
   font-size: 12px;
   color: rgba(255, 255, 255, 0.6);
-}
-
-.secure-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: rgba(255, 255, 255, 0.8);
-
-  svg {
-    width: 14px;
-    height: 14px;
-  }
 }
 
 /* ---------------- 认证区 ---------------- */

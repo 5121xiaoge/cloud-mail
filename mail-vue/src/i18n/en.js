@@ -9,7 +9,6 @@ const en = {
         feature2Desc: 'Role-based permissions keep accounts and data under control',
         feature3: 'Global edge deployment',
         feature3Desc: 'Serverless architecture with high availability and low latency',
-        securedBy: 'End-to-end encrypted connection · Authorized administrators only',
         switchLang: 'Switch language',
         welcome: 'Welcome back',
         createAccount: 'Create your account',

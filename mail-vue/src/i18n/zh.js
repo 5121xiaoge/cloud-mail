@@ -9,7 +9,6 @@ const zh = {
         feature2Desc: '基于角色分配权限，账号与数据安全可控',
         feature3: '全球边缘部署',
         feature3Desc: 'Serverless 架构，高可用、低延迟、免运维',
-        securedBy: '全程加密连接 · 仅限授权管理员访问',
         switchLang: '切换语言',
         welcome: '欢迎回来',
         createAccount: '创建账号',
