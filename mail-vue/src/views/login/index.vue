@@ -353,7 +353,6 @@ async function saveToken(token) {
     router.addRoute('layout', routerData);
   });
   await router.replace({name: 'layout'})
-  uiStore.showNotice()
 }
 
 function refreshWebsiteConfig() {
